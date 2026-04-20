@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安全终端 - OCI IP 管理</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0;}
+        .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+        .input-group { margin-bottom: 20px; text-align: left;}
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #333;}
+        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px;}
+        button { background-color: #0088cc; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; width: 100%; transition: 0.2s; font-weight: bold;}
+        button:hover { background-color: #006699; }
+        button:disabled { background-color: #a0c4d6; cursor: not-allowed; }
+        .btn-secondary { background-color: #6c757d; margin-top: 10px;}
+        .btn-secondary:hover { background-color: #5a6268; }
+        .msg { margin-top: 15px; font-size: 14px; min-height: 20px;}
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .result-box { margin-top: 20px; display: none; padding: 15px; background: #e8f5e9; border-radius: 6px; border: 1px solid #c8e6c9;}
+        .ip-display { font-size: 24px; font-family: monospace; font-weight: bold; margin: 10px 0; color: #1b5e20;}
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2 style="margin-top: 0;">OCI 安全换 IP 终端</h2>
+    
+    <div class="input-group">
+        <label>Telegram User ID</label>
+        <input type="number" id="tgId" placeholder="输入你的 TG 数字 ID">
+    </div>
+
+    <button id="sendCodeBtn" onclick="sendCode()" class="btn-secondary">获取验证码</button>
+    <p id="codeMsg" class="msg"></p>
+
+    <div class="input-group" style="margin-top: 20px;">
+        <label>验证码 (通过 Bot 接收)</label>
+        <input type="text" id="otpCode" placeholder="输入 6 位验证码">
+    </div>
+
+    <button id="actionBtn" onclick="changeIP()">一键更换 IP</button>
+    <p id="statusMsg" class="msg"></p>
+
+    <div class="result-box" id="resultBox">
+        <div>🎉 IP 更换成功</div>
+        <div class="ip-display" id="newIpText"></div>
+        <button style="background-color: #28a745;" onclick="copyToClipboard()">📋 复制 IP</button>
+    </div>
+</div>
+
+<script>
+    async function sendCode() {
+        const tgId = document.getElementById('tgId').value;
+        const btn = document.getElementById('sendCodeBtn');
+        const msg = document.getElementById('codeMsg');
+
+        if (!tgId) { msg.className = 'msg error'; msg.innerText = "请输入 Telegram ID"; return; }
+
+        btn.disabled = true;
+        btn.innerText = "发送中...";
+        msg.innerText = "";
+
+        try {
+            const res = await fetch('/api/send-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tg_id: tgId })
+            });
+            const data = await res.json();
+            
+            msg.className = 'msg ' + (data.success ? 'success' : 'error');
+            msg.innerText = data.success ? data.message : data.error;
+            
+            if(data.success) {
+                let countdown = 60;
+                const timer = setInterval(() => {
+                    btn.innerText = `${countdown} 秒后重试`;
+                    countdown--;
+                    if (countdown < 0) {
+                        clearInterval(timer);
+                        btn.disabled = false;
+                        btn.innerText = "重新获取验证码";
+                    }
+                }, 1000);
+            } else {
+                btn.disabled = false;
+                btn.innerText = "获取验证码";
+            }
+        } catch (e) {
+            msg.className = 'msg error';
+            msg.innerText = "网络错误，请稍后重试。";
+            btn.disabled = false;
+            btn.innerText = "获取验证码";
+        }
+    }
+
+    async function changeIP() {
+        const tgId = document.getElementById('tgId').value;
+        const code = document.getElementById('otpCode').value;
+        const btn = document.getElementById('actionBtn');
+        const msg = document.getElementById('statusMsg');
+        const resultBox = document.getElementById('resultBox');
+
+        if (!tgId || !code) { msg.className = 'msg error'; msg.innerText = "请输入 TG ID 和验证码"; return; }
+
+        btn.disabled = true;
+        btn.innerText = "⏳ 正在与甲骨文通信，请耐心等待...";
+        msg.innerText = "";
+        resultBox.style.display = "none";
+
+        try {
+            const res = await fetch('/api/change-ip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tg_id: tgId, code: code })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                document.getElementById('newIpText').innerText = data.new_ip;
+                resultBox.style.display = "block";
+                msg.className = 'msg success';
+                msg.innerText = "操作完成！";
+                document.getElementById('otpCode').value = ''; // 清空验证码
+            } else {
+                msg.className = 'msg error';
+                msg.innerText = "❌ 失败: " + data.error;
+            }
+        } catch (e) {
+            msg.className = 'msg error';
+            msg.innerText = "❌ 请求后端失败，请检查网络。";
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "一键更换 IP";
+        }
+    }
+
+    function copyToClipboard() {
+        const ipText = document.getElementById('newIpText').innerText;
+        navigator.clipboard.writeText(ipText).then(() => alert("IP 已复制！"));
+    }
+</script>
+</body>
+</html>
