@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import requests
 import threading
 import oci
@@ -19,7 +20,6 @@ CORS(app)
 # --- 配置读取 ---
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_TG_ID')
-ADMIN_WEB_PWD = os.getenv('ADMIN_WEB_PASSWORD', 'admin123')
 
 OCI_CONFIG = {
     "user": os.getenv('OCI_USER_OCID'),
@@ -33,6 +33,9 @@ servers = {}
 STATS_FILE = 'stats.json'
 PERMS_FILE = 'permissions.json'
 
+# 管理员会话存储 (内存)
+admin_session = {"code": None, "expires": 0}
+
 bot = telebot.TeleBot(TG_BOT_TOKEN)
 
 # --- 文件持久化管理 ---
@@ -40,7 +43,6 @@ def load_permissions():
     if not os.path.exists(PERMS_FILE): return {}
     with open(PERMS_FILE, 'r') as f: 
         data = json.load(f)
-        # 兼容旧版本格式 (将旧的纯列表格式升级为包含额度的字典格式)
         for k, v in data.items():
             if isinstance(v, list):
                 data[k] = {"ocids": v, "max_changes": 0, "used_changes": 0}
@@ -122,8 +124,25 @@ fetch_oci_instances()
 # ==========================================
 # Telegram 机器人交互端 (客户端)
 # ==========================================
+
+# 【新增】严格白名单校验函数
+def is_whitelisted(user_id):
+    user_id = str(user_id)
+    # 1. 管理员拥有绝对权限
+    if user_id == str(ADMIN_ID): 
+        return True 
+    # 2. 只要在网页后台被分配过任何数据（存在于 permissions.json 中），即视为白名单客户
+    perms = load_permissions()
+    if user_id in perms:
+        return True
+    return False
+
 @bot.message_handler(commands=['start', 'menu'])
 def user_menu(message):
+    # 【新增】非白名单用户直接无视，不作任何回复 (幽灵模式)
+    if not is_whitelisted(message.chat.id):
+        return
+
     user_id = str(message.chat.id)
     perms = load_permissions()
     user_data = perms.get(user_id, {})
@@ -131,12 +150,10 @@ def user_menu(message):
     max_changes = user_data.get('max_changes', 0)
     used_changes = user_data.get('used_changes', 0)
 
-    # 权限检查
     if not allowed_ocids:
         bot.send_message(message.chat.id, "❌ **权限拒绝**\n您当前没有任何授权可操作的服务器。")
         return
         
-    # 额度检查
     remaining = max_changes - used_changes
     if remaining <= 0:
         bot.send_message(message.chat.id, "⚠️ **额度耗尽**\n您的更换 IP 次数已用完，请联系管理员充值。")
@@ -151,6 +168,11 @@ def user_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ip_'))
 def handle_change_ip(call):
+    # 【新增】非白名单用户强行发包拦截
+    if not is_whitelisted(call.message.chat.id):
+        bot.answer_callback_query(call.id, "⛔ 非法请求，您的账号未受信任！", show_alert=True)
+        return
+
     user_id = str(call.message.chat.id)
     target_ocid = call.data[3:]
     
@@ -161,7 +183,6 @@ def handle_change_ip(call):
         bot.answer_callback_query(call.id, "❌ 授权已过期或被撤销！", show_alert=True)
         return
         
-    # 执行前的最后一次额度校验
     max_changes = user_data.get('max_changes', 0)
     used_changes = user_data.get('used_changes', 0)
     if used_changes >= max_changes:
@@ -177,7 +198,6 @@ def handle_change_ip(call):
     old_ip, new_ip = change_oracle_ip(target_ocid)
     
     if new_ip:
-        # 【核心逻辑】仅在甲骨文返回了新 IP (更换成功) 的情况下，才扣除客户额度
         perms[user_id]['used_changes'] += 1
         save_permissions(perms)
         remaining = max_changes - perms[user_id]['used_changes']
@@ -189,7 +209,6 @@ def handle_change_ip(call):
         
         send_tg_message(ADMIN_ID, f"📢 **系统通知：客户执行换IP**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n💳 该客户剩余额度: `{remaining}`\n📊 系统总更换: `{count}`")
     else:
-        # 更换失败，不扣除额度
         bot.edit_message_text("❌ 更换失败 (API抽风或频率限制)。\n**本次操作不扣除您的额度**，请稍后再试。", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id)
 
@@ -210,22 +229,43 @@ def index():
     return render_template('index.html')
 
 def check_auth(req):
-    return req.json.get('password') == ADMIN_WEB_PWD
+    """验证传入的 code 是否为有效的管理员会话"""
+    code = str(req.json.get('code', ''))
+    if not code or not admin_session.get('code'): return False
+    if code == admin_session['code'] and time.time() < admin_session['expires']:
+        return True
+    return False
+
+@app.route('/api/admin/send-code', methods=['POST'])
+def admin_send_code():
+    data = request.json
+    tg_id = str(data.get('tg_id', '')).strip()
+    
+    # 安全校验：只有输入的 ID 是真正的管理员 ID 时，才发送验证码，防止恶意刷接口
+    if tg_id != str(ADMIN_ID):
+        return jsonify({"success": False, "error": "管理员 ID 不匹配或无权操作！"})
+        
+    code = str(random.randint(100000, 999999))
+    admin_session["code"] = code
+    admin_session["expires"] = time.time() + 7200 # 验证码 / 会话有效期 2 小时
+
+    send_tg_message(ADMIN_ID, f"🔐 **后台登录验证码**\n\n您的动态密码为：`{code}`\n\n该验证码在 2 小时内有效。如非本人操作请忽略。")
+    return jsonify({"success": True, "message": "验证码已发送至您的 Telegram，请查收！"})
 
 @app.route('/api/admin/data', methods=['POST'])
 def admin_data():
-    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
+    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期，请重新获取"})
     return jsonify({"success": True, "servers": servers, "permissions": load_permissions()})
 
 @app.route('/api/admin/sync', methods=['POST'])
 def admin_sync():
-    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
+    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期"})
     success, msg = fetch_oci_instances()
     return jsonify({"success": success, "message": msg, "servers": servers})
 
 @app.route('/api/admin/save', methods=['POST'])
 def admin_save():
-    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
+    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期"})
     
     data = request.json
     target_tg_id = str(data.get('tg_id', '')).strip()
@@ -237,7 +277,6 @@ def admin_save():
     perms = load_permissions()
     
     if selected_ocids or max_changes > 0:
-        # 提取历史使用次数，如果是新用户则为 0
         used_changes = perms.get(target_tg_id, {}).get('used_changes', 0)
         perms[target_tg_id] = {
             "ocids": selected_ocids,
@@ -245,7 +284,6 @@ def admin_save():
             "used_changes": used_changes
         }
     else:
-        # 如果什么都没选且额度为0，删除该用户配置
         perms.pop(target_tg_id, None)
         
     save_permissions(perms)
