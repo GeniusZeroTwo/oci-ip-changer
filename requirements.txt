@@ -4,3 +4,4 @@ requests
 oci
 python-dotenv
 gunicorn
+pyTelegramBotAPI
