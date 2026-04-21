@@ -98,208 +98,53 @@ def change_oracle_ip(target_ocid):
         compute_client = oci.core.ComputeClient(OCI_CONFIG)
         vnc_client = oci.core.VirtualNetworkClient(OCI_CONFIG)
 
+        # 1. 获取网卡 (VNIC) 信息
         vnic_attachments = compute_client.list_vnic_attachments(
             compartment_id=OCI_CONFIG["tenancy"], instance_id=target_ocid).data
+        if not vnic_attachments:
+            raise Exception("未找到该实例的网卡 (VNIC)")
         vnic_id = vnic_attachments[0].vnic_id
+        
+        # 2. 获取内网 IP (Private IP) 信息
         private_ips = vnc_client.list_private_ips(vnic_id=vnic_id).data
+        if not private_ips:
+            raise Exception("未找到该实例的内网 IP")
         primary_private_ip_id = private_ips[0].id
 
-        public_ips = vnc_client.list_public_ips(
-            scope="REGION", compartment_id=OCI_CONFIG["tenancy"], lifetime="EPHEMERAL").data
-        
         old_ip = "Unknown"
-        for ip in public_ips:
-            if ip.private_ip_id == primary_private_ip_id:
-                old_ip = ip.ip_address
-                vnc_client.delete_public_ip(ip.id)
-                break
 
+        # 3. 【核心升级】智能检测并清理当前绑定的公网 IP (兼容临时与保留IP)
+        try:
+            get_ip_details = oci.core.models.GetPublicIpByPrivateIpIdDetails(private_ip_id=primary_private_ip_id)
+            public_ip = vnc_client.get_public_ip_by_private_ip_id(get_ip_details).data
+            old_ip = public_ip.ip_address
+            
+            if public_ip.lifetime == 'RESERVED':
+                # 如果发现是保留 IP，为了安全起见不删除它，而是通过传入空字符串来"解绑"
+                update_details = oci.core.models.UpdatePublicIpDetails(private_ip_id="")
+                vnc_client.update_public_ip(public_ip.id, update_details)
+            else:
+                # 如果是临时 IP，直接彻底删除
+                vnc_client.delete_public_ip(public_ip.id)
+                
+            # 缓冲时间：给甲骨文云端2秒钟释放网络资源，彻底避免 409 冲突
+            time.sleep(2)
+        except oci.exceptions.ServiceError as e:
+            if e.status == 404:
+                old_ip = "None" # 当前网卡上干干净净，没有绑定任何公网 IP
+            else:
+                raise e
+
+        # 4. 创建并绑定全新的临时公网 IP
         create_details = oci.core.models.CreatePublicIpDetails(
-            compartment_id=OCI_CONFIG["tenancy"], lifetime="EPHEMERAL", private_ip_id=primary_private_ip_id)
+            compartment_id=OCI_CONFIG["tenancy"], 
+            lifetime="EPHEMERAL", 
+            private_ip_id=primary_private_ip_id
+        )
         new_ip = vnc_client.create_public_ip(create_details).data.ip_address
         
         return old_ip, new_ip
     except Exception as e:
         error_msg = str(e)
         print(f"OCI API 错误: {error_msg}")
-        return None, None
-
-fetch_oci_instances()
-
-# ==========================================
-# Telegram 机器人交互端 (客户端)
-# ==========================================
-
-def is_whitelisted(user_id):
-    user_id = str(user_id)
-    if user_id == str(ADMIN_ID): return True 
-    perms = load_permissions()
-    if user_id in perms: return True
-    return False
-
-@bot.message_handler(commands=['start', 'menu'])
-def user_menu(message):
-    if not is_whitelisted(message.chat.id): return
-
-    user_id = str(message.chat.id)
-    perms = load_permissions()
-    user_data = perms.get(user_id, {})
-    allowed_ocids = user_data.get('ocids', [])
-    max_changes = user_data.get('max_changes', 0)
-    used_changes = user_data.get('used_changes', 0)
-
-    if not allowed_ocids:
-        bot.send_message(message.chat.id, "❌ **权限拒绝**\n您当前没有任何授权可操作的服务器。")
-        return
-        
-    remaining = max_changes - used_changes
-    if remaining <= 0:
-        bot.send_message(message.chat.id, "⚠️ **额度耗尽**\n您的更换 IP 次数已用完，请联系管理员充值。")
-        return
-
-    markup = InlineKeyboardMarkup()
-    for ocid in allowed_ocids:
-        name = next((n for n, o in servers.items() if o == ocid), "未知节点")
-        markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{get_short_id(ocid)}"))
-    
-    bot.send_message(message.chat.id, f"🎛️ **您的专属 OCI 控制台**\n\n📊 当前剩余额度：`{remaining}` 次\n请选择要操作的服务器：", reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('ip_'))
-def handle_change_ip(call):
-    if not is_whitelisted(call.message.chat.id):
-        bot.answer_callback_query(call.id, "⛔ 非法请求，账号未受信任！", show_alert=True)
-        return
-
-    user_id = str(call.message.chat.id)
-    short_id = call.data[3:] 
-    
-    target_ocid = None
-    for name, ocid in servers.items():
-        if get_short_id(ocid) == short_id:
-            target_ocid = ocid
-            break
-            
-    if not target_ocid:
-        bot.answer_callback_query(call.id, "❌ 找不到对应的服务器实例，可能已被删除！", show_alert=True)
-        return
-
-    perms = load_permissions()
-    user_data = perms.get(user_id, {})
-    
-    if target_ocid not in user_data.get('ocids', []):
-        bot.answer_callback_query(call.id, "❌ 授权已过期或被撤销！", show_alert=True)
-        return
-        
-    max_changes = user_data.get('max_changes', 0)
-    used_changes = user_data.get('used_changes', 0)
-    if used_changes >= max_changes:
-        bot.answer_callback_query(call.id, "❌ 额度已用完！", show_alert=True)
-        bot.edit_message_text("⚠️ **额度耗尽**\n您的更换 IP 额度已用完，请联系管理员充值。", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        
-        # 【新增】监控：客户额度用完仍尝试点击
-        send_tg_message(ADMIN_ID, f"🛡️ **拦截通知**\n\n客户 `{user_id}` 额度已耗尽，但仍尝试更换 IP，已被系统拦截。")
-        return
-    
-    server_name = next((n for n, o in servers.items() if o == target_ocid), "未知节点")
-    
-    bot.edit_message_text(f"⏳ 正在向甲骨文云发送 `{server_name}` 的更换指令，请耐心等待...", 
-                          chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-    
-    old_ip, new_ip = change_oracle_ip(target_ocid)
-    
-    if new_ip:
-        perms[user_id]['used_changes'] += 1
-        save_permissions(perms)
-        remaining = max_changes - perms[user_id]['used_changes']
-        
-        count = log_change(user_id, server_name, old_ip, new_ip)
-        
-        bot.edit_message_text(f"✅ **IP 更换成功！**\n\n🖥️ 节点: `{server_name}`\n🌐 新 IP: `{new_ip}`\n📊 剩余额度: `{remaining}` 次", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        
-        # 【已有】监控：客户成功更换 IP
-        send_tg_message(ADMIN_ID, f"🟢 **客户换IP (成功)**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n💳 剩余额度: `{remaining}`\n📊 系统总更换: `{count}`")
-    else:
-        bot.edit_message_text("❌ 更换失败 (API抽风或频率限制)。\n**本次操作不扣除您的额度**，请稍后再试。", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id)
-        
-        # 【新增】监控：API 更换失败，上报管理员
-        send_tg_message(ADMIN_ID, f"🔴 **客户换IP (失败)**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n❌ 原因: `甲骨文API拒绝或调用频繁`\n💡 本次操作未扣除客户额度。")
-
-def run_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
-        except Exception:
-            time.sleep(3)
-
-threading.Thread(target=run_bot_polling, daemon=True).start()
-
-# ==========================================
-# 网页管理后台端 (管理员端)
-# ==========================================
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-def check_auth(req):
-    code = str(req.json.get('code', ''))
-    if not code or not admin_session.get('code'): return False
-    if code == admin_session['code'] and time.time() < admin_session['expires']:
-        return True
-    return False
-
-@app.route('/api/admin/send-code', methods=['POST'])
-def admin_send_code():
-    data = request.json
-    tg_id = str(data.get('tg_id', '')).strip()
-    
-    if tg_id != str(ADMIN_ID):
-        return jsonify({"success": False, "error": "管理员 ID 不匹配或无权操作！"})
-        
-    code = str(random.randint(100000, 999999))
-    admin_session["code"] = code
-    admin_session["expires"] = time.time() + 7200 
-
-    send_tg_message(ADMIN_ID, f"🔐 **后台登录验证码**\n\n您的动态密码为：`{code}`\n\n该验证码在 2 小时内有效。如非本人操作请忽略。")
-    return jsonify({"success": True, "message": "验证码已发送至您的 Telegram，请查收！"})
-
-@app.route('/api/admin/data', methods=['POST'])
-def admin_data():
-    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期，请重新获取"})
-    return jsonify({"success": True, "servers": servers, "permissions": load_permissions()})
-
-@app.route('/api/admin/sync', methods=['POST'])
-def admin_sync():
-    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期"})
-    success, msg = fetch_oci_instances()
-    return jsonify({"success": success, "message": msg, "servers": servers})
-
-@app.route('/api/admin/save', methods=['POST'])
-def admin_save():
-    if not check_auth(request): return jsonify({"success": False, "error": "验证码错误或已过期"})
-    
-    data = request.json
-    target_tg_id = str(data.get('tg_id', '')).strip()
-    selected_ocids = data.get('ocids', [])
-    max_changes = int(data.get('max_changes', 0))
-    
-    if not target_tg_id: return jsonify({"success": False, "error": "请指定目标用户的 Telegram ID"})
-
-    perms = load_permissions()
-    
-    if selected_ocids or max_changes > 0:
-        used_changes = perms.get(target_tg_id, {}).get('used_changes', 0)
-        perms[target_tg_id] = {
-            "ocids": selected_ocids,
-            "max_changes": max_changes,
-            "used_changes": used_changes
-        }
-    else:
-        perms.pop(target_tg_id, None)
-        
-    save_permissions(perms)
-    return jsonify({"success": True, "message": f"用户 {target_tg_id} 的权限和额度已更新！"})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+        send_tg_message(ADMIN_ID, f"⚠️ **甲骨文 API 报错详情**\n\n
