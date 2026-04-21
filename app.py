@@ -41,7 +41,6 @@ bot = telebot.TeleBot(TG_BOT_TOKEN)
 
 # --- 基础工具函数 ---
 def get_short_id(text):
-    """将超长的 OCID 压缩为 16 位的短哈希，以符合 Telegram 64 字节限制"""
     return hashlib.md5(str(text).encode()).hexdigest()[:16]
 
 def load_permissions():
@@ -121,7 +120,8 @@ def change_oracle_ip(target_ocid):
         
         return old_ip, new_ip
     except Exception as e:
-        print(f"OCI API 错误: {e}")
+        error_msg = str(e)
+        print(f"OCI API 错误: {error_msg}")
         return None, None
 
 fetch_oci_instances()
@@ -160,7 +160,6 @@ def user_menu(message):
     markup = InlineKeyboardMarkup()
     for ocid in allowed_ocids:
         name = next((n for n, o in servers.items() if o == ocid), "未知节点")
-        # 修复点：使用短哈希替代长 OCID
         markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{get_short_id(ocid)}"))
     
     bot.send_message(message.chat.id, f"🎛️ **您的专属 OCI 控制台**\n\n📊 当前剩余额度：`{remaining}` 次\n请选择要操作的服务器：", reply_markup=markup, parse_mode="Markdown")
@@ -172,9 +171,8 @@ def handle_change_ip(call):
         return
 
     user_id = str(call.message.chat.id)
-    short_id = call.data[3:] # 获取短哈希
+    short_id = call.data[3:] 
     
-    # 修复点：反向查找真实的 OCID
     target_ocid = None
     for name, ocid in servers.items():
         if get_short_id(ocid) == short_id:
@@ -197,6 +195,9 @@ def handle_change_ip(call):
     if used_changes >= max_changes:
         bot.answer_callback_query(call.id, "❌ 额度已用完！", show_alert=True)
         bot.edit_message_text("⚠️ **额度耗尽**\n您的更换 IP 额度已用完，请联系管理员充值。", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        
+        # 【新增】监控：客户额度用完仍尝试点击
+        send_tg_message(ADMIN_ID, f"🛡️ **拦截通知**\n\n客户 `{user_id}` 额度已耗尽，但仍尝试更换 IP，已被系统拦截。")
         return
     
     server_name = next((n for n, o in servers.items() if o == target_ocid), "未知节点")
@@ -216,10 +217,14 @@ def handle_change_ip(call):
         bot.edit_message_text(f"✅ **IP 更换成功！**\n\n🖥️ 节点: `{server_name}`\n🌐 新 IP: `{new_ip}`\n📊 剩余额度: `{remaining}` 次", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         
-        send_tg_message(ADMIN_ID, f"📢 **系统通知：客户执行换IP**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n💳 该客户剩余额度: `{remaining}`\n📊 系统总更换: `{count}`")
+        # 【已有】监控：客户成功更换 IP
+        send_tg_message(ADMIN_ID, f"🟢 **客户换IP (成功)**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n💳 剩余额度: `{remaining}`\n📊 系统总更换: `{count}`")
     else:
         bot.edit_message_text("❌ 更换失败 (API抽风或频率限制)。\n**本次操作不扣除您的额度**，请稍后再试。", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id)
+        
+        # 【新增】监控：API 更换失败，上报管理员
+        send_tg_message(ADMIN_ID, f"🔴 **客户换IP (失败)**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n❌ 原因: `甲骨文API拒绝或调用频繁`\n💡 本次操作未扣除客户额度。")
 
 def run_bot_polling():
     while True:
