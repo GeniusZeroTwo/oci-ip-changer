@@ -21,6 +21,9 @@
         .hidden { display: none; }
         #msg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
         .success { color: #198754; } .error { color: #dc3545; }
+        .flex-row { display: flex; justify-content: space-between; gap: 15px; }
+        .flex-row .group { flex: 1; }
+        .used-info { font-size: 13px; color: #dc3545; margin-top: 5px; font-weight: normal; }
     </style>
 </head>
 <body>
@@ -36,22 +39,31 @@
 </div>
 
 <div class="container hidden" id="dashboardArea">
-    <h2>🛡️ OCI 授权分配中心</h2>
+    <h2>🛡️ OCI 授权与额度分配</h2>
     
     <button class="btn-warning" onclick="syncServers()">🔄 从甲骨文云同步最新服务器列表</button>
     
     <div class="group">
         <label>目标客户的 Telegram ID</label>
-        <input type="number" id="targetTgId" placeholder="例如：987654321">
+        <div style="display: flex; gap: 10px;">
+            <input type="number" id="targetTgId" placeholder="例如：987654321">
+            <button style="background-color: #6c757d; width: 120px; padding: 0;" onclick="loadUserPerms()">读取信息</button>
+        </div>
     </div>
     
-    <button style="background-color: #6c757d; margin-bottom: 20px;" onclick="loadUserPerms()">读取该客户当前权限</button>
+    <div class="group">
+        <label>
+            分配总成功次数 
+            <span class="used-info" id="usedCountDisplay">(已成功使用：0 次)</span>
+        </label>
+        <input type="number" id="maxChangesInput" placeholder="输入允许他成功更换的总次数" value="10">
+    </div>
 
     <label>授权可操作的服务器 (可多选)</label>
     <div class="server-list" id="serverList">
         </div>
 
-    <button style="background-color: #198754;" onclick="savePermissions()">💾 保存/更新该用户授权</button>
+    <button style="background-color: #198754;" onclick="savePermissions()">💾 保存更新</button>
     <div id="sysMsg" id="msg"></div>
 </div>
 
@@ -127,15 +139,21 @@
         const tgId = document.getElementById('targetTgId').value;
         if(!tgId) return showMsg('sysMsg', '请先输入目标客户 ID', false);
         
-        const userOcids = globalPerms[tgId] || [];
-        renderServerList(userOcids);
-        showMsg('sysMsg', `已加载客户 ${tgId} 的权限状态`, true);
+        // 兼容新旧数据结构
+        let userData = globalPerms[tgId] || {ocids: [], max_changes: 10, used_changes: 0};
+        
+        document.getElementById('maxChangesInput').value = userData.max_changes;
+        document.getElementById('usedCountDisplay').innerText = `(该客户已成功使用：${userData.used_changes} 次)`;
+        
+        renderServerList(userData.ocids);
+        showMsg('sysMsg', `已加载客户 ${tgId} 的状态`, true);
     }
 
     async function savePermissions() {
         const tgId = document.getElementById('targetTgId').value;
         if(!tgId) return showMsg('sysMsg', '请先输入目标客户 ID', false);
 
+        const maxChanges = parseInt(document.getElementById('maxChangesInput').value) || 0;
         const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]');
         const selectedOcids = [];
         checkboxes.forEach(cb => { if(cb.checked) selectedOcids.push(cb.value); });
@@ -145,14 +163,18 @@
             body: JSON.stringify({
                 password: document.getElementById('adminPwd').value,
                 tg_id: tgId,
-                ocids: selectedOcids
+                ocids: selectedOcids,
+                max_changes: maxChanges
             })
         });
         const data = await res.json();
         
         if(data.success) {
-            globalPerms[tgId] = selectedOcids; // 更新本地缓存
-            showMsg('sysMsg', '✅ 授权更新成功！', true);
+            // 更新本地前端缓存数据
+            const usedChanges = globalPerms[tgId] ? globalPerms[tgId].used_changes : 0;
+            globalPerms[tgId] = { ocids: selectedOcids, max_changes: maxChanges, used_changes: usedChanges };
+            
+            showMsg('sysMsg', '✅ 更新保存成功！', true);
         } else {
             showMsg('sysMsg', '❌ 更新失败: ' + data.error, false);
         }
