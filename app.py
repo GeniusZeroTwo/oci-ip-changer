@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import time
 import requests
 import threading
@@ -20,7 +19,7 @@ CORS(app)
 # --- 配置读取 ---
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_TG_ID')
-ALLOWED_USERS = [int(uid.strip()) for uid in os.getenv('ALLOWED_TG_USERS', '').split(',') if uid.strip()]
+ADMIN_WEB_PWD = os.getenv('ADMIN_WEB_PASSWORD', 'admin123')
 
 OCI_CONFIG = {
     "user": os.getenv('OCI_USER_OCID'),
@@ -30,109 +29,21 @@ OCI_CONFIG = {
     "region": os.getenv('OCI_REGION')
 }
 
-# 全局变量，用于存储自动获取的服务器列表
+# 缓存服务器列表 { "display_name": "ocid" }
 servers = {}
-active_server_name = None
-active_server_ocid = None
-
-otp_store = {}
 STATS_FILE = 'stats.json'
+PERMS_FILE = 'permissions.json'
 
 bot = telebot.TeleBot(TG_BOT_TOKEN)
 
-# ==========================================
-# 核心新增：自动获取 OCI 实例列表
-# ==========================================
-def fetch_oci_instances():
-    global servers, active_server_name, active_server_ocid
-    try:
-        compute_client = oci.core.ComputeClient(OCI_CONFIG)
-        # 获取当前租户(或指定Compartment)下的所有实例
-        instances_data = compute_client.list_instances(compartment_id=OCI_CONFIG["tenancy"]).data
-        
-        new_servers = {}
-        for inst in instances_data:
-            # 只提取正在运行的机器 (过滤掉已终止或停止的机器)
-            if inst.lifecycle_state == 'RUNNING':
-                new_servers[inst.display_name] = inst.id
-                
-        if new_servers:
-            servers = new_servers
-            # 如果当前没有选中活跃节点，或者选中的节点已经被删了，就默认选中列表里的第一个
-            if active_server_name not in servers:
-                active_server_name = list(servers.keys())[0]
-                active_server_ocid = servers[active_server_name]
-            return True, f"✅ 成功拉取 {len(servers)} 台运行中的服务器！"
-        else:
-            return False, "⚠️ 未发现任何运行中的服务器。"
-    except Exception as e:
-        print(f"拉取实例失败: {e}")
-        return False, f"❌ 拉取实例失败，请检查 OCI API 权限或网络: {e}"
+# --- 文件持久化管理 ---
+def load_permissions():
+    """读取用户权限文件格式: {"tg_id": ["ocid1", "ocid2"]}"""
+    if not os.path.exists(PERMS_FILE): return {}
+    with open(PERMS_FILE, 'r') as f: return json.load(f)
 
-# 服务启动时，先自动拉取一次
-fetch_oci_instances()
-
-# --- Telegram 交互控制端 ---
-@bot.message_handler(commands=['sync'])
-def command_sync(message):
-    """管理员手动触发同步最新服务器列表"""
-    if str(message.chat.id) != str(ADMIN_ID): return
-    bot.send_message(message.chat.id, "⏳ 正在与甲骨文云通信，拉取最新服务器列表...")
-    success, msg = fetch_oci_instances()
-    bot.send_message(message.chat.id, msg)
-
-@bot.message_handler(commands=['servers', 'menu', 'start'])
-def send_server_menu(message):
-    if str(message.chat.id) != str(ADMIN_ID): return
-    
-    if not servers:
-        bot.send_message(message.chat.id, "⚠️ 当前没有可用的服务器。请尝试发送 /sync 重新同步。")
-        return
-
-    markup = InlineKeyboardMarkup()
-    for name, ocid in servers.items():
-        prefix = "✅ " if ocid == active_server_ocid else "⚪ "
-        markup.add(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"set_{name}"))
-    
-    bot.send_message(message.chat.id, "🎛️ **OCI 服务器控制台**\n\n请选择网页端一键换 IP 默认操作的服务器：\n(如新增了机器，请发送 /sync 刷新)", reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('set_'))
-def handle_server_selection(call):
-    global active_server_ocid, active_server_name
-    if str(call.message.chat.id) != str(ADMIN_ID): return
-    
-    selected_name = call.data[4:]
-    if selected_name in servers:
-        active_server_name = selected_name
-        active_server_ocid = servers[selected_name]
-        
-        bot.answer_callback_query(call.id, f"已切换至：{selected_name}")
-        
-        markup = InlineKeyboardMarkup()
-        for name, ocid in servers.items():
-            prefix = "✅ " if ocid == active_server_ocid else "⚪ "
-            markup.add(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"set_{name}"))
-        
-        bot.edit_message_text(f"🎛️ **OCI 服务器控制台**\n\n当前绑定操作实例：`{selected_name}`", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, 
-                              reply_markup=markup, parse_mode="Markdown")
-
-def run_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
-        except Exception as e:
-            time.sleep(3)
-
-threading.Thread(target=run_bot_polling, daemon=True).start()
-
-# --- 基础工具函数 ---
-def send_tg_message(chat_id, text):
-    if not chat_id: return
-    try:
-        bot.send_message(chat_id, text, parse_mode="Markdown")
-    except Exception as e:
-        print(f"TG消息发送失败: {e}")
+def save_permissions(data):
+    with open(PERMS_FILE, 'w') as f: json.dump(data, f, indent=4)
 
 def load_stats():
     if not os.path.exists(STATS_FILE): return {"total_changes": 0, "history": []}
@@ -148,14 +59,37 @@ def log_change(user_id, server_name, old_ip, new_ip):
     with open(STATS_FILE, 'w') as f: json.dump(stats, f, indent=4)
     return stats["total_changes"]
 
-# --- OCI 换 IP 核心逻辑 ---
-def change_oracle_ip():
+def send_tg_message(chat_id, text):
+    if not chat_id: return
+    try:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
+    except Exception as e:
+        pass
+
+# --- OCI API 操作 ---
+def fetch_oci_instances():
+    global servers
+    try:
+        compute_client = oci.core.ComputeClient(OCI_CONFIG)
+        instances_data = compute_client.list_instances(compartment_id=OCI_CONFIG["tenancy"]).data
+        
+        new_servers = {}
+        for inst in instances_data:
+            if inst.lifecycle_state == 'RUNNING':
+                new_servers[inst.display_name] = inst.id
+                
+        if new_servers: servers = new_servers
+        return True, "同步成功"
+    except Exception as e:
+        return False, str(e)
+
+def change_oracle_ip(target_ocid):
     try:
         compute_client = oci.core.ComputeClient(OCI_CONFIG)
         vnc_client = oci.core.VirtualNetworkClient(OCI_CONFIG)
 
         vnic_attachments = compute_client.list_vnic_attachments(
-            compartment_id=OCI_CONFIG["tenancy"], instance_id=active_server_ocid).data
+            compartment_id=OCI_CONFIG["tenancy"], instance_id=target_ocid).data
         vnic_id = vnic_attachments[0].vnic_id
         private_ips = vnc_client.list_private_ips(vnic_id=vnic_id).data
         primary_private_ip_id = private_ips[0].id
@@ -179,62 +113,110 @@ def change_oracle_ip():
         print(f"OCI API 错误: {e}")
         return None, None
 
-# --- Web API 路由 ---
+# 启动时抓取一次
+fetch_oci_instances()
+
+# ==========================================
+# Telegram 机器人交互端 (客户端)
+# ==========================================
+@bot.message_handler(commands=['start', 'menu'])
+def user_menu(message):
+    user_id = str(message.chat.id)
+    perms = load_permissions()
+    allowed_ocids = perms.get(user_id, [])
+
+    if not allowed_ocids:
+        bot.send_message(message.chat.id, "❌ **权限拒绝**\n您当前没有任何授权可操作的服务器。请联系管理员分配。")
+        return
+
+    markup = InlineKeyboardMarkup()
+    for ocid in allowed_ocids:
+        # 反查服务器名称
+        name = next((n for n, o in servers.items() if o == ocid), "未知节点")
+        markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{ocid}"))
+    
+    bot.send_message(message.chat.id, "🎛️ **您的专属 OCI 控制台**\n\n请选择要更换 IP 的服务器：", reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('ip_'))
+def handle_change_ip(call):
+    user_id = str(call.message.chat.id)
+    target_ocid = call.data[3:] # 去掉前缀 'ip_'
+    
+    perms = load_permissions()
+    if target_ocid not in perms.get(user_id, []):
+        bot.answer_callback_query(call.id, "❌ 授权已过期或被管理员撤销！", show_alert=True)
+        return
+    
+    server_name = next((n for n, o in servers.items() if o == target_ocid), "未知节点")
+    
+    # 界面转圈等待
+    bot.edit_message_text(f"⏳ 正在向甲骨文云发送 `{server_name}` 的更换指令，请耐心等待 (约10秒)...", 
+                          chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+    
+    old_ip, new_ip = change_oracle_ip(target_ocid)
+    
+    if new_ip:
+        count = log_change(user_id, server_name, old_ip, new_ip)
+        
+        # 给客户推送结果
+        bot.edit_message_text(f"✅ **IP 更换成功！**\n\n🖥️ 节点: `{server_name}`\n🌐 新 IP: `{new_ip}`", 
+                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        
+        # 给管理员抄送通知
+        send_tg_message(ADMIN_ID, f"📢 **系统通知：客户执行换IP**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n📊 系统总更换: `{count}`")
+    else:
+        bot.edit_message_text("❌ 更换失败，请稍后重试或联系管理员。", 
+                              chat_id=call.message.chat.id, message_id=call.message.message_id)
+
+def run_bot_polling():
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception:
+            time.sleep(3)
+
+threading.Thread(target=run_bot_polling, daemon=True).start()
+
+# ==========================================
+# 网页管理后台端 (管理员端)
+# ==========================================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/api/send-code', methods=['POST'])
-def send_code():
-    data = request.json
-    tg_id = int(data.get('tg_id', 0))
+def check_auth(req):
+    return req.json.get('password') == ADMIN_WEB_PWD
 
-    if tg_id not in ALLOWED_USERS:
-        return jsonify({"success": False, "error": "未经授权的用户！"})
+@app.route('/api/admin/data', methods=['POST'])
+def admin_data():
+    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
+    return jsonify({"success": True, "servers": servers, "permissions": load_permissions()})
 
-    code = str(random.randint(100000, 999999))
-    otp_store[tg_id] = {"code": code, "expires": time.time() + 300}
+@app.route('/api/admin/sync', methods=['POST'])
+def admin_sync():
+    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
+    success, msg = fetch_oci_instances()
+    return jsonify({"success": success, "message": msg, "servers": servers})
 
-    send_tg_message(tg_id, f"🔐 您的网页端身份验证码为：`{code}`")
-    return jsonify({"success": True, "message": "验证码已发送到您的 Telegram，请查收！"})
-
-@app.route('/api/change-ip', methods=['POST'])
-def handle_change_ip():
-    data = request.json
-    tg_id = int(data.get('tg_id', 0))
-    code = str(data.get('code', ''))
-
-    if tg_id not in ALLOWED_USERS:
-        return jsonify({"success": False, "error": "未经授权的用户！"})
+@app.route('/api/admin/save', methods=['POST'])
+def admin_save():
+    if not check_auth(request): return jsonify({"success": False, "error": "密码错误或未授权"})
     
-    record = otp_store.get(tg_id)
-    if not record or time.time() > record['expires'] or record['code'] != code:
-        return jsonify({"success": False, "error": "验证码错误或已过期！请重新获取。"})
-
-    if not active_server_ocid:
-        return jsonify({"success": False, "error": "无法获取服务器列表，请联系管理员！"})
-
-    del otp_store[tg_id]
-
-    old_ip, new_ip = change_oracle_ip()
+    data = request.json
+    target_tg_id = str(data.get('tg_id', '')).strip()
+    selected_ocids = data.get('ocids', [])
     
-    if new_ip:
-        count = log_change(tg_id, active_server_name, old_ip, new_ip)
-        
-        admin_report = (
-            f"📢 **系统通知：IP 已更换**\n\n"
-            f"👤 操作客户: `{tg_id}`\n"
-            f"🖥️ 目标实例: `{active_server_name}`\n"
-            f"🔄 弃用 IP: `{old_ip}`\n"
-            f"🌐 启用 IP: `{new_ip}`\n\n"
-            f"📊 累计更换总次数: `{count}`"
-        )
-        send_tg_message(ADMIN_ID, admin_report)
-        send_tg_message(tg_id, f"✅ IP 更换成功！\n\n🖥️ 处理节点: `{active_server_name}`\n🌐 新 IP 地址: `{new_ip}`")
-        
-        return jsonify({"success": True, "new_ip": new_ip})
+    if not target_tg_id: return jsonify({"success": False, "error": "请指定目标用户的 Telegram ID"})
+
+    perms = load_permissions()
+    if selected_ocids:
+        perms[target_tg_id] = selected_ocids
     else:
-        return jsonify({"success": False, "error": "IP 更换失败，请检查服务器网络或 API 限制。"})
+        # 如果没有勾选任何机器，则移除该用户的权限
+        perms.pop(target_tg_id, None)
+        
+    save_permissions(perms)
+    return jsonify({"success": True, "message": f"用户 {target_tg_id} 的权限已更新！"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
