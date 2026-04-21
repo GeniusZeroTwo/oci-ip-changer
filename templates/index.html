@@ -13,29 +13,36 @@
         input[type="text"], input[type="password"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
         button { background-color: #0d6efd; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;}
         button:hover { background-color: #0b5ed7; }
+        button:disabled { background-color: #a5c8fd; cursor: not-allowed; }
+        button.btn-secondary { background-color: #6c757d; margin-top: 10px; }
+        button.btn-secondary:hover { background-color: #5a6268; }
         button.btn-warning { background-color: #ffc107; color: #000; margin-bottom: 15px;}
         .server-list { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; max-height: 300px; overflow-y: auto; margin-bottom: 20px;}
         .server-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
         .server-item:last-child { border-bottom: none; }
         .server-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 15px; cursor: pointer;}
         .hidden { display: none; }
-        #msg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
+        #msg, #loginMsg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
         .success { color: #198754; } .error { color: #dc3545; }
         .flex-row { display: flex; justify-content: space-between; gap: 15px; }
-        .flex-row .group { flex: 1; }
         .used-info { font-size: 13px; color: #dc3545; margin-top: 5px; font-weight: normal; }
     </style>
 </head>
 <body>
 
 <div class="container" id="loginArea">
-    <h2>管理员登录</h2>
+    <h2>后台安全登录</h2>
     <div class="group">
-        <label>控制台密码</label>
-        <input type="password" id="adminPwd" placeholder="输入 .env 中的 ADMIN_WEB_PASSWORD">
+        <label>管理员 Telegram ID</label>
+        <input type="number" id="adminIdInput" placeholder="输入 .env 中的 ADMIN_TG_ID 以验证身份">
+        <button id="sendAdminCodeBtn" class="btn-secondary" onclick="sendAdminCode()">获取 TG 验证码</button>
     </div>
-    <button onclick="login()">登 录</button>
-    <div id="loginMsg" class="error" style="text-align: center; margin-top: 15px;"></div>
+    <div class="group">
+        <label>动态验证码 (有效期 2 小时)</label>
+        <input type="number" id="adminCode" placeholder="输入接收到的 6 位验证码">
+    </div>
+    <button onclick="login()">登 录 控制台</button>
+    <div id="loginMsg"></div>
 </div>
 
 <div class="container hidden" id="dashboardArea">
@@ -64,12 +71,13 @@
         </div>
 
     <button style="background-color: #198754;" onclick="savePermissions()">💾 保存更新</button>
-    <div id="sysMsg" id="msg"></div>
+    <div id="sysMsg"></div>
 </div>
 
 <script>
     let globalServers = {};
     let globalPerms = {};
+    let sessionCode = ''; // 存储管理员的会话代码
 
     function showMsg(id, text, isSuccess) {
         const el = document.getElementById(id);
@@ -78,17 +86,49 @@
         setTimeout(() => el.innerText = '', 4000);
     }
 
+    async function sendAdminCode() {
+        const tgId = document.getElementById('adminIdInput').value;
+        if (!tgId) { return showMsg('loginMsg', '请先输入管理员的 Telegram ID', false); }
+        
+        const btn = document.getElementById('sendAdminCodeBtn');
+        btn.disabled = true; btn.innerText = "发送中...";
+        
+        try {
+            const res = await fetch('/api/admin/send-code', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({tg_id: tgId})
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                showMsg('loginMsg', data.message, true);
+                let count = 60;
+                const timer = setInterval(() => {
+                    btn.innerText = `${count} 秒后重试`; count--;
+                    if(count < 0) { clearInterval(timer); btn.disabled = false; btn.innerText = "获取 TG 验证码"; }
+                }, 1000);
+            } else {
+                showMsg('loginMsg', data.error, false);
+                btn.disabled = false; btn.innerText = "获取 TG 验证码";
+            }
+        } catch(e) {
+            showMsg('loginMsg', '网络请求失败', false);
+            btn.disabled = false; btn.innerText = "获取 TG 验证码";
+        }
+    }
+
     async function login() {
-        const pwd = document.getElementById('adminPwd').value;
-        if(!pwd) return;
+        const code = document.getElementById('adminCode').value;
+        if(!code) { return showMsg('loginMsg', '请输入验证码', false); }
         
         const res = await fetch('/api/admin/data', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({password: pwd})
+            body: JSON.stringify({code: code})
         });
         const data = await res.json();
         
         if(data.success) {
+            sessionCode = code; // 将验证码作为后续请求的通行证
             globalServers = data.servers;
             globalPerms = data.permissions;
             document.getElementById('loginArea').classList.add('hidden');
@@ -103,7 +143,7 @@
         showMsg('sysMsg', '正在向甲骨文云请求数据...', true);
         const res = await fetch('/api/admin/sync', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({password: document.getElementById('adminPwd').value})
+            body: JSON.stringify({code: sessionCode})
         });
         const data = await res.json();
         if(data.success) {
@@ -139,7 +179,6 @@
         const tgId = document.getElementById('targetTgId').value;
         if(!tgId) return showMsg('sysMsg', '请先输入目标客户 ID', false);
         
-        // 兼容新旧数据结构
         let userData = globalPerms[tgId] || {ocids: [], max_changes: 10, used_changes: 0};
         
         document.getElementById('maxChangesInput').value = userData.max_changes;
@@ -161,7 +200,7 @@
         const res = await fetch('/api/admin/save', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                password: document.getElementById('adminPwd').value,
+                code: sessionCode,
                 tg_id: tgId,
                 ocids: selectedOcids,
                 max_changes: maxChanges
@@ -170,10 +209,8 @@
         const data = await res.json();
         
         if(data.success) {
-            // 更新本地前端缓存数据
             const usedChanges = globalPerms[tgId] ? globalPerms[tgId].used_changes : 0;
             globalPerms[tgId] = { ocids: selectedOcids, max_changes: maxChanges, used_changes: usedChanges };
-            
             showMsg('sysMsg', '✅ 更新保存成功！', true);
         } else {
             showMsg('sysMsg', '❌ 更新失败: ' + data.error, false);
