@@ -4,6 +4,7 @@ import time
 import random
 import requests
 import threading
+import hashlib
 import oci
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -38,7 +39,11 @@ admin_session = {"code": None, "expires": 0}
 
 bot = telebot.TeleBot(TG_BOT_TOKEN)
 
-# --- 文件持久化管理 ---
+# --- 基础工具函数 ---
+def get_short_id(text):
+    """将超长的 OCID 压缩为 16 位的短哈希，以符合 Telegram 64 字节限制"""
+    return hashlib.md5(str(text).encode()).hexdigest()[:16]
+
 def load_permissions():
     if not os.path.exists(PERMS_FILE): return {}
     with open(PERMS_FILE, 'r') as f: 
@@ -125,23 +130,16 @@ fetch_oci_instances()
 # Telegram 机器人交互端 (客户端)
 # ==========================================
 
-# 【新增】严格白名单校验函数
 def is_whitelisted(user_id):
     user_id = str(user_id)
-    # 1. 管理员拥有绝对权限
-    if user_id == str(ADMIN_ID): 
-        return True 
-    # 2. 只要在网页后台被分配过任何数据（存在于 permissions.json 中），即视为白名单客户
+    if user_id == str(ADMIN_ID): return True 
     perms = load_permissions()
-    if user_id in perms:
-        return True
+    if user_id in perms: return True
     return False
 
 @bot.message_handler(commands=['start', 'menu'])
 def user_menu(message):
-    # 【新增】非白名单用户直接无视，不作任何回复 (幽灵模式)
-    if not is_whitelisted(message.chat.id):
-        return
+    if not is_whitelisted(message.chat.id): return
 
     user_id = str(message.chat.id)
     perms = load_permissions()
@@ -162,20 +160,31 @@ def user_menu(message):
     markup = InlineKeyboardMarkup()
     for ocid in allowed_ocids:
         name = next((n for n, o in servers.items() if o == ocid), "未知节点")
-        markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{ocid}"))
+        # 修复点：使用短哈希替代长 OCID
+        markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{get_short_id(ocid)}"))
     
     bot.send_message(message.chat.id, f"🎛️ **您的专属 OCI 控制台**\n\n📊 当前剩余额度：`{remaining}` 次\n请选择要操作的服务器：", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ip_'))
 def handle_change_ip(call):
-    # 【新增】非白名单用户强行发包拦截
     if not is_whitelisted(call.message.chat.id):
-        bot.answer_callback_query(call.id, "⛔ 非法请求，您的账号未受信任！", show_alert=True)
+        bot.answer_callback_query(call.id, "⛔ 非法请求，账号未受信任！", show_alert=True)
         return
 
     user_id = str(call.message.chat.id)
-    target_ocid = call.data[3:]
+    short_id = call.data[3:] # 获取短哈希
     
+    # 修复点：反向查找真实的 OCID
+    target_ocid = None
+    for name, ocid in servers.items():
+        if get_short_id(ocid) == short_id:
+            target_ocid = ocid
+            break
+            
+    if not target_ocid:
+        bot.answer_callback_query(call.id, "❌ 找不到对应的服务器实例，可能已被删除！", show_alert=True)
+        return
+
     perms = load_permissions()
     user_data = perms.get(user_id, {})
     
@@ -229,7 +238,6 @@ def index():
     return render_template('index.html')
 
 def check_auth(req):
-    """验证传入的 code 是否为有效的管理员会话"""
     code = str(req.json.get('code', ''))
     if not code or not admin_session.get('code'): return False
     if code == admin_session['code'] and time.time() < admin_session['expires']:
@@ -241,13 +249,12 @@ def admin_send_code():
     data = request.json
     tg_id = str(data.get('tg_id', '')).strip()
     
-    # 安全校验：只有输入的 ID 是真正的管理员 ID 时，才发送验证码，防止恶意刷接口
     if tg_id != str(ADMIN_ID):
         return jsonify({"success": False, "error": "管理员 ID 不匹配或无权操作！"})
         
     code = str(random.randint(100000, 999999))
     admin_session["code"] = code
-    admin_session["expires"] = time.time() + 7200 # 验证码 / 会话有效期 2 小时
+    admin_session["expires"] = time.time() + 7200 
 
     send_tg_message(ADMIN_ID, f"🔐 **后台登录验证码**\n\n您的动态密码为：`{code}`\n\n该验证码在 2 小时内有效。如非本人操作请忽略。")
     return jsonify({"success": True, "message": "验证码已发送至您的 Telegram，请查收！"})
