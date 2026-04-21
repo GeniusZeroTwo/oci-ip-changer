@@ -29,7 +29,6 @@ OCI_CONFIG = {
     "region": os.getenv('OCI_REGION')
 }
 
-# 缓存服务器列表 { "display_name": "ocid" }
 servers = {}
 STATS_FILE = 'stats.json'
 PERMS_FILE = 'permissions.json'
@@ -38,9 +37,14 @@ bot = telebot.TeleBot(TG_BOT_TOKEN)
 
 # --- 文件持久化管理 ---
 def load_permissions():
-    """读取用户权限文件格式: {"tg_id": ["ocid1", "ocid2"]}"""
     if not os.path.exists(PERMS_FILE): return {}
-    with open(PERMS_FILE, 'r') as f: return json.load(f)
+    with open(PERMS_FILE, 'r') as f: 
+        data = json.load(f)
+        # 兼容旧版本格式 (将旧的纯列表格式升级为包含额度的字典格式)
+        for k, v in data.items():
+            if isinstance(v, list):
+                data[k] = {"ocids": v, "max_changes": 0, "used_changes": 0}
+        return data
 
 def save_permissions(data):
     with open(PERMS_FILE, 'w') as f: json.dump(data, f, indent=4)
@@ -113,7 +117,6 @@ def change_oracle_ip(target_ocid):
         print(f"OCI API 错误: {e}")
         return None, None
 
-# 启动时抓取一次
 fetch_oci_instances()
 
 # ==========================================
@@ -123,49 +126,71 @@ fetch_oci_instances()
 def user_menu(message):
     user_id = str(message.chat.id)
     perms = load_permissions()
-    allowed_ocids = perms.get(user_id, [])
+    user_data = perms.get(user_id, {})
+    allowed_ocids = user_data.get('ocids', [])
+    max_changes = user_data.get('max_changes', 0)
+    used_changes = user_data.get('used_changes', 0)
 
+    # 权限检查
     if not allowed_ocids:
-        bot.send_message(message.chat.id, "❌ **权限拒绝**\n您当前没有任何授权可操作的服务器。请联系管理员分配。")
+        bot.send_message(message.chat.id, "❌ **权限拒绝**\n您当前没有任何授权可操作的服务器。")
+        return
+        
+    # 额度检查
+    remaining = max_changes - used_changes
+    if remaining <= 0:
+        bot.send_message(message.chat.id, "⚠️ **额度耗尽**\n您的更换 IP 次数已用完，请联系管理员充值。")
         return
 
     markup = InlineKeyboardMarkup()
     for ocid in allowed_ocids:
-        # 反查服务器名称
         name = next((n for n, o in servers.items() if o == ocid), "未知节点")
         markup.add(InlineKeyboardButton(f"🔄 更换 {name} IP", callback_data=f"ip_{ocid}"))
     
-    bot.send_message(message.chat.id, "🎛️ **您的专属 OCI 控制台**\n\n请选择要更换 IP 的服务器：", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"🎛️ **您的专属 OCI 控制台**\n\n📊 当前剩余额度：`{remaining}` 次\n请选择要操作的服务器：", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('ip_'))
 def handle_change_ip(call):
     user_id = str(call.message.chat.id)
-    target_ocid = call.data[3:] # 去掉前缀 'ip_'
+    target_ocid = call.data[3:]
     
     perms = load_permissions()
-    if target_ocid not in perms.get(user_id, []):
-        bot.answer_callback_query(call.id, "❌ 授权已过期或被管理员撤销！", show_alert=True)
+    user_data = perms.get(user_id, {})
+    
+    if target_ocid not in user_data.get('ocids', []):
+        bot.answer_callback_query(call.id, "❌ 授权已过期或被撤销！", show_alert=True)
+        return
+        
+    # 执行前的最后一次额度校验
+    max_changes = user_data.get('max_changes', 0)
+    used_changes = user_data.get('used_changes', 0)
+    if used_changes >= max_changes:
+        bot.answer_callback_query(call.id, "❌ 额度已用完！", show_alert=True)
+        bot.edit_message_text("⚠️ **额度耗尽**\n您的更换 IP 额度已用完，请联系管理员充值。", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         return
     
     server_name = next((n for n, o in servers.items() if o == target_ocid), "未知节点")
     
-    # 界面转圈等待
-    bot.edit_message_text(f"⏳ 正在向甲骨文云发送 `{server_name}` 的更换指令，请耐心等待 (约10秒)...", 
+    bot.edit_message_text(f"⏳ 正在向甲骨文云发送 `{server_name}` 的更换指令，请耐心等待...", 
                           chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
     
     old_ip, new_ip = change_oracle_ip(target_ocid)
     
     if new_ip:
+        # 【核心逻辑】仅在甲骨文返回了新 IP (更换成功) 的情况下，才扣除客户额度
+        perms[user_id]['used_changes'] += 1
+        save_permissions(perms)
+        remaining = max_changes - perms[user_id]['used_changes']
+        
         count = log_change(user_id, server_name, old_ip, new_ip)
         
-        # 给客户推送结果
-        bot.edit_message_text(f"✅ **IP 更换成功！**\n\n🖥️ 节点: `{server_name}`\n🌐 新 IP: `{new_ip}`", 
+        bot.edit_message_text(f"✅ **IP 更换成功！**\n\n🖥️ 节点: `{server_name}`\n🌐 新 IP: `{new_ip}`\n📊 剩余额度: `{remaining}` 次", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         
-        # 给管理员抄送通知
-        send_tg_message(ADMIN_ID, f"📢 **系统通知：客户执行换IP**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n📊 系统总更换: `{count}`")
+        send_tg_message(ADMIN_ID, f"📢 **系统通知：客户执行换IP**\n\n👤 客户 ID: `{user_id}`\n🖥️ 节点: `{server_name}`\n🔄 旧 IP: `{old_ip}`\n🌐 新 IP: `{new_ip}`\n💳 该客户剩余额度: `{remaining}`\n📊 系统总更换: `{count}`")
     else:
-        bot.edit_message_text("❌ 更换失败，请稍后重试或联系管理员。", 
+        # 更换失败，不扣除额度
+        bot.edit_message_text("❌ 更换失败 (API抽风或频率限制)。\n**本次操作不扣除您的额度**，请稍后再试。", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id)
 
 def run_bot_polling():
@@ -205,18 +230,26 @@ def admin_save():
     data = request.json
     target_tg_id = str(data.get('tg_id', '')).strip()
     selected_ocids = data.get('ocids', [])
+    max_changes = int(data.get('max_changes', 0))
     
     if not target_tg_id: return jsonify({"success": False, "error": "请指定目标用户的 Telegram ID"})
 
     perms = load_permissions()
-    if selected_ocids:
-        perms[target_tg_id] = selected_ocids
+    
+    if selected_ocids or max_changes > 0:
+        # 提取历史使用次数，如果是新用户则为 0
+        used_changes = perms.get(target_tg_id, {}).get('used_changes', 0)
+        perms[target_tg_id] = {
+            "ocids": selected_ocids,
+            "max_changes": max_changes,
+            "used_changes": used_changes
+        }
     else:
-        # 如果没有勾选任何机器，则移除该用户的权限
+        # 如果什么都没选且额度为0，删除该用户配置
         perms.pop(target_tg_id, None)
         
     save_permissions(perms)
-    return jsonify({"success": True, "message": f"用户 {target_tg_id} 的权限已更新！"})
+    return jsonify({"success": True, "message": f"用户 {target_tg_id} 的权限和额度已更新！"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
