@@ -3,143 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安全终端 - OCI IP 管理</title>
+    <title>OCI 客户授权管理系统</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0;}
-        .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
-        .input-group { margin-bottom: 20px; text-align: left;}
-        label { display: block; margin-bottom: 8px; font-weight: bold; color: #333;}
-        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px;}
-        button { background-color: #0088cc; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; width: 100%; transition: 0.2s; font-weight: bold;}
-        button:hover { background-color: #006699; }
-        button:disabled { background-color: #a0c4d6; cursor: not-allowed; }
-        .btn-secondary { background-color: #6c757d; margin-top: 10px;}
-        .btn-secondary:hover { background-color: #5a6268; }
-        .msg { margin-top: 15px; font-size: 14px; min-height: 20px;}
-        .success { color: #28a745; }
-        .error { color: #dc3545; }
-        .result-box { margin-top: 20px; display: none; padding: 15px; background: #e8f5e9; border-radius: 6px; border: 1px solid #c8e6c9;}
-        .ip-display { font-size: 24px; font-family: monospace; font-weight: bold; margin: 10px 0; color: #1b5e20;}
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;}
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { margin-top: 0; color: #333; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px;}
+        .group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="password"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+        button { background-color: #0d6efd; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;}
+        button:hover { background-color: #0b5ed7; }
+        button.btn-warning { background-color: #ffc107; color: #000; margin-bottom: 15px;}
+        .server-list { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; max-height: 300px; overflow-y: auto; margin-bottom: 20px;}
+        .server-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .server-item:last-child { border-bottom: none; }
+        .server-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 15px; cursor: pointer;}
+        .hidden { display: none; }
+        #msg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
+        .success { color: #198754; } .error { color: #dc3545; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h2 style="margin-top: 0;">OCI 安全换 IP 终端</h2>
+<div class="container" id="loginArea">
+    <h2>管理员登录</h2>
+    <div class="group">
+        <label>控制台密码</label>
+        <input type="password" id="adminPwd" placeholder="输入 .env 中的 ADMIN_WEB_PASSWORD">
+    </div>
+    <button onclick="login()">登 录</button>
+    <div id="loginMsg" class="error" style="text-align: center; margin-top: 15px;"></div>
+</div>
+
+<div class="container hidden" id="dashboardArea">
+    <h2>🛡️ OCI 授权分配中心</h2>
     
-    <div class="input-group">
-        <label>Telegram User ID</label>
-        <input type="number" id="tgId" placeholder="输入你的 TG 数字 ID">
+    <button class="btn-warning" onclick="syncServers()">🔄 从甲骨文云同步最新服务器列表</button>
+    
+    <div class="group">
+        <label>目标客户的 Telegram ID</label>
+        <input type="number" id="targetTgId" placeholder="例如：987654321">
     </div>
+    
+    <button style="background-color: #6c757d; margin-bottom: 20px;" onclick="loadUserPerms()">读取该客户当前权限</button>
 
-    <button id="sendCodeBtn" onclick="sendCode()" class="btn-secondary">获取验证码</button>
-    <p id="codeMsg" class="msg"></p>
+    <label>授权可操作的服务器 (可多选)</label>
+    <div class="server-list" id="serverList">
+        </div>
 
-    <div class="input-group" style="margin-top: 20px;">
-        <label>验证码 (通过 Bot 接收)</label>
-        <input type="text" id="otpCode" placeholder="输入 6 位验证码">
-    </div>
-
-    <button id="actionBtn" onclick="changeIP()">一键更换 IP</button>
-    <p id="statusMsg" class="msg"></p>
-
-    <div class="result-box" id="resultBox">
-        <div>🎉 IP 更换成功</div>
-        <div class="ip-display" id="newIpText"></div>
-        <button style="background-color: #28a745;" onclick="copyToClipboard()">📋 复制 IP</button>
-    </div>
+    <button style="background-color: #198754;" onclick="savePermissions()">💾 保存/更新该用户授权</button>
+    <div id="sysMsg" id="msg"></div>
 </div>
 
 <script>
-    async function sendCode() {
-        const tgId = document.getElementById('tgId').value;
-        const btn = document.getElementById('sendCodeBtn');
-        const msg = document.getElementById('codeMsg');
+    let globalServers = {};
+    let globalPerms = {};
 
-        if (!tgId) { msg.className = 'msg error'; msg.innerText = "请输入 Telegram ID"; return; }
+    function showMsg(id, text, isSuccess) {
+        const el = document.getElementById(id);
+        el.innerText = text;
+        el.className = isSuccess ? 'success' : 'error';
+        setTimeout(() => el.innerText = '', 4000);
+    }
 
-        btn.disabled = true;
-        btn.innerText = "发送中...";
-        msg.innerText = "";
-
-        try {
-            const res = await fetch('/api/send-code', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tg_id: tgId })
-            });
-            const data = await res.json();
-            
-            msg.className = 'msg ' + (data.success ? 'success' : 'error');
-            msg.innerText = data.success ? data.message : data.error;
-            
-            if(data.success) {
-                let countdown = 60;
-                const timer = setInterval(() => {
-                    btn.innerText = `${countdown} 秒后重试`;
-                    countdown--;
-                    if (countdown < 0) {
-                        clearInterval(timer);
-                        btn.disabled = false;
-                        btn.innerText = "重新获取验证码";
-                    }
-                }, 1000);
-            } else {
-                btn.disabled = false;
-                btn.innerText = "获取验证码";
-            }
-        } catch (e) {
-            msg.className = 'msg error';
-            msg.innerText = "网络错误，请稍后重试。";
-            btn.disabled = false;
-            btn.innerText = "获取验证码";
+    async function login() {
+        const pwd = document.getElementById('adminPwd').value;
+        if(!pwd) return;
+        
+        const res = await fetch('/api/admin/data', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({password: pwd})
+        });
+        const data = await res.json();
+        
+        if(data.success) {
+            globalServers = data.servers;
+            globalPerms = data.permissions;
+            document.getElementById('loginArea').classList.add('hidden');
+            document.getElementById('dashboardArea').classList.remove('hidden');
+            renderServerList();
+        } else {
+            showMsg('loginMsg', data.error, false);
         }
     }
 
-    async function changeIP() {
-        const tgId = document.getElementById('tgId').value;
-        const code = document.getElementById('otpCode').value;
-        const btn = document.getElementById('actionBtn');
-        const msg = document.getElementById('statusMsg');
-        const resultBox = document.getElementById('resultBox');
-
-        if (!tgId || !code) { msg.className = 'msg error'; msg.innerText = "请输入 TG ID 和验证码"; return; }
-
-        btn.disabled = true;
-        btn.innerText = "⏳ 正在与甲骨文通信，请耐心等待...";
-        msg.innerText = "";
-        resultBox.style.display = "none";
-
-        try {
-            const res = await fetch('/api/change-ip', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tg_id: tgId, code: code })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                document.getElementById('newIpText').innerText = data.new_ip;
-                resultBox.style.display = "block";
-                msg.className = 'msg success';
-                msg.innerText = "操作完成！";
-                document.getElementById('otpCode').value = ''; // 清空验证码
-            } else {
-                msg.className = 'msg error';
-                msg.innerText = "❌ 失败: " + data.error;
-            }
-        } catch (e) {
-            msg.className = 'msg error';
-            msg.innerText = "❌ 请求后端失败，请检查网络。";
-        } finally {
-            btn.disabled = false;
-            btn.innerText = "一键更换 IP";
+    async function syncServers() {
+        showMsg('sysMsg', '正在向甲骨文云请求数据...', true);
+        const res = await fetch('/api/admin/sync', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({password: document.getElementById('adminPwd').value})
+        });
+        const data = await res.json();
+        if(data.success) {
+            globalServers = data.servers;
+            renderServerList();
+            showMsg('sysMsg', '列表同步成功！', true);
+        } else {
+            showMsg('sysMsg', '同步失败：' + data.message, false);
         }
     }
 
-    function copyToClipboard() {
-        const ipText = document.getElementById('newIpText').innerText;
-        navigator.clipboard.writeText(ipText).then(() => alert("IP 已复制！"));
+    function renderServerList(checkedOcids = []) {
+        const listDiv = document.getElementById('serverList');
+        listDiv.innerHTML = '';
+        
+        if (Object.keys(globalServers).length === 0) {
+            listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击上方同步按钮。</div>';
+            return;
+        }
+
+        for (const [name, ocid] of Object.entries(globalServers)) {
+            const isChecked = checkedOcids.includes(ocid) ? 'checked' : '';
+            listDiv.innerHTML += `
+                <div class="server-item">
+                    <input type="checkbox" id="chk_${ocid}" value="${ocid}" ${isChecked}>
+                    <label style="margin:0; cursor:pointer;" for="chk_${ocid}">${name}</label>
+                </div>
+            `;
+        }
+    }
+
+    function loadUserPerms() {
+        const tgId = document.getElementById('targetTgId').value;
+        if(!tgId) return showMsg('sysMsg', '请先输入目标客户 ID', false);
+        
+        const userOcids = globalPerms[tgId] || [];
+        renderServerList(userOcids);
+        showMsg('sysMsg', `已加载客户 ${tgId} 的权限状态`, true);
+    }
+
+    async function savePermissions() {
+        const tgId = document.getElementById('targetTgId').value;
+        if(!tgId) return showMsg('sysMsg', '请先输入目标客户 ID', false);
+
+        const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]');
+        const selectedOcids = [];
+        checkboxes.forEach(cb => { if(cb.checked) selectedOcids.push(cb.value); });
+
+        const res = await fetch('/api/admin/save', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                password: document.getElementById('adminPwd').value,
+                tg_id: tgId,
+                ocids: selectedOcids
+            })
+        });
+        const data = await res.json();
+        
+        if(data.success) {
+            globalPerms[tgId] = selectedOcids; // 更新本地缓存
+            showMsg('sysMsg', '✅ 授权更新成功！', true);
+        } else {
+            showMsg('sysMsg', '❌ 更新失败: ' + data.error, false);
+        }
     }
 </script>
 </body>
