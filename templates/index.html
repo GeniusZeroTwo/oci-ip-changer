@@ -38,7 +38,7 @@
     <button id="sendAdminCodeBtn" class="btn-secondary" style="margin-top: 0; margin-bottom: 20px;" onclick="sendAdminCode()">一键获取 TG 验证码</button>
     <div class="group">
         <label>动态验证码 (有效期 1 小时)</label>
-        <input type="number" id="adminCode" placeholder="输入接收到的 6 位数字">
+        <input type="number" id="adminCode" placeholder="输入接收到的 6 位数字" onkeypress="if(event.key==='Enter') login()">
     </div>
     <button onclick="login()">登 录 控制台</button>
     <div id="loginMsg"></div>
@@ -55,7 +55,7 @@
             <option value="">-- 从已保存的客户中选择 (更新老客户) --</option>
         </select>
         <div style="display: flex; gap: 10px;">
-            <input type="number" id="targetTgId" placeholder="手动输入新客户ID (添加新客户)">
+            <input type="number" id="targetTgId" placeholder="手动输入新客户ID (添加新客户)" onkeypress="if(event.key==='Enter') loadUserPerms()">
             <button style="background-color: #6c757d; width: 120px; padding: 0;" onclick="loadUserPerms()">读取信息</button>
         </div>
     </div>
@@ -72,7 +72,7 @@
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(10)">+10 次</button>
-            <input type="number" id="customAddInput" placeholder="填写数值" style="padding: 8px; margin: 0; width: 100px;">
+            <input type="number" id="customAddInput" placeholder="填写数值" style="padding: 8px; margin: 0; width: 100px;" onkeypress="if(event.key==='Enter') addCustomTimes()">
             <button type="button" style="background-color: #17a2b8; padding: 8px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
         </div>
         <div style="font-size: 12px; color: #888; margin-top: 8px;">💡 提示：点击按钮直接为客户叠加剩余额度 (填负数可扣除)。操作后请记得点击底部【保存更新】。</div>
@@ -81,7 +81,10 @@
     <label>授权可操作的服务器 (可多选)</label>
     <div class="server-list" id="serverList"></div>
 
-    <button id="saveBtn" style="background-color: #198754;" onclick="savePermissions()">💾 保存更新</button>
+    <div style="display: flex; gap: 10px;">
+        <button id="saveBtn" style="background-color: #198754; flex: 1;" onclick="savePermissions()">💾 保存更新</button>
+        <button id="deleteBtn" style="background-color: #dc3545; width: 140px;" onclick="deleteUser()">🗑️ 删除客户</button>
+    </div>
     <div id="sysMsg"></div>
 </div>
 
@@ -89,6 +92,14 @@
     let globalServers = {};
     let globalPerms = {};
     let sessionCode = '';
+
+    // 安全工具函数：防止跨站脚本攻击 (XSS)
+    function escapeHTML(str) {
+        return String(str).replace(/[&<>'"]/g, match => {
+            const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
+            return escapeMap[match];
+        });
+    }
 
     function showMsg(id, text, isSuccess) {
         const el = document.getElementById(id);
@@ -113,15 +124,15 @@
                 let count = 60;
                 const timer = setInterval(() => {
                     btn.innerText = `${count} 秒后重试`; count--;
-                    if(count < 0) { clearInterval(timer); btn.disabled = false; btn.innerText = "获取 TG 验证码"; }
+                    if(count < 0) { clearInterval(timer); btn.disabled = false; btn.innerText = "一键获取 TG 验证码"; }
                 }, 1000);
             } else {
                 showMsg('loginMsg', data.error, false);
-                btn.disabled = false; btn.innerText = "获取 TG 验证码";
+                btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
             }
         } catch(e) {
-            showMsg('loginMsg', '网络请求失败', false);
-            btn.disabled = false; btn.innerText = "获取 TG 验证码";
+            showMsg('loginMsg', '网络请求失败，请检查后端运行状态', false);
+            btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
         }
     }
 
@@ -161,7 +172,7 @@
             renderServerList();
             showMsg('sysMsg', '列表同步成功！', true);
         } else {
-            showMsg('sysMsg', '同步失败：' + data.message, false);
+            showMsg('sysMsg', '同步失败：' + (data.message ? escapeHTML(data.message) : '未知错误'), false);
         }
     }
 
@@ -173,7 +184,9 @@
             const used = globalPerms[tgId].used_changes || 0;
             const max = globalPerms[tgId].max_changes || 0;
             const remaining = max - used;
-            select.innerHTML += `<option value="${tgId}">客户: ${tgId} (剩余额度: ${remaining > 0 ? remaining : 0} 次)</option>`;
+            // 修复潜在的 XSS
+            const safeTgId = escapeHTML(tgId);
+            select.innerHTML += `<option value="${safeTgId}">客户: ${safeTgId} (剩余额度: ${remaining > 0 ? remaining : 0} 次)</option>`;
         }
     }
 
@@ -197,10 +210,13 @@
 
         for (const [name, ocid] of Object.entries(globalServers)) {
             const isChecked = checkedOcids.includes(ocid) ? 'checked' : '';
+            // 修复潜在的 XSS
+            const safeOcid = escapeHTML(ocid);
+            const safeName = escapeHTML(name);
             listDiv.innerHTML += `
                 <div class="server-item">
-                    <input type="checkbox" id="chk_${ocid}" value="${ocid}" ${isChecked}>
-                    <label style="margin:0; cursor:pointer;" for="chk_${ocid}">${name}</label>
+                    <input type="checkbox" id="chk_${safeOcid}" value="${safeOcid}" ${isChecked}>
+                    <label style="margin:0; cursor:pointer;" for="chk_${safeOcid}">${safeName}</label>
                 </div>
             `;
         }
@@ -213,7 +229,7 @@
     }
 
     function loadUserPerms() {
-        const tgId = document.getElementById('targetTgId').value;
+        const tgId = document.getElementById('targetTgId').value.trim();
         if(!tgId) return;
         
         let userData = globalPerms[tgId];
@@ -221,7 +237,7 @@
             document.getElementById('maxChangesInput').value = userData.max_changes;
             renderQuotaDisplay(userData.max_changes, userData.used_changes);
             renderServerList(userData.ocids);
-            showMsg('sysMsg', `已成功加载老客户 ${tgId} 的配置`, true);
+            showMsg('sysMsg', `已成功加载老客户 ${escapeHTML(tgId)} 的配置`, true);
         } else {
             document.getElementById('maxChangesInput').value = 0;
             renderQuotaDisplay(0, 0);
@@ -238,7 +254,7 @@
         if (newMax < 0) newMax = 0;
         input.value = newMax;
         
-        const tgId = document.getElementById('targetTgId').value;
+        const tgId = document.getElementById('targetTgId').value.trim();
         let used = 0;
         if (tgId && globalPerms[tgId]) {
             used = globalPerms[tgId].used_changes || 0;
@@ -260,6 +276,69 @@
             addInput.value = ''; 
         } else {
             showMsg('sysMsg', '请输入有效的数值', false);
+        }
+    }
+
+    // 【新增】删除客户的交互逻辑（双击防误触设计）
+    async function deleteUser() {
+        const tgIdInput = document.getElementById('targetTgId');
+        const tgId = tgIdInput.value.trim();
+        if(!tgId) return showMsg('sysMsg', '错误：请先选择或输入要删除的客户 ID', false);
+
+        const btn = document.getElementById('deleteBtn');
+        
+        // 第一次点击变为警告状态
+        if (btn.innerText === "🗑️ 删除客户") {
+            btn.innerText = "⚠️ 再次点击确认";
+            btn.style.backgroundColor = "#ffc107"; // 变黄
+            btn.style.color = "#000";
+            
+            // 3秒后如果没有确认，恢复原状
+            setTimeout(() => {
+                if (btn.innerText === "⚠️ 再次点击确认") {
+                    btn.innerText = "🗑️ 删除客户";
+                    btn.style.backgroundColor = "#dc3545"; // 恢复红色
+                    btn.style.color = "#fff";
+                }
+            }, 3000);
+            return;
+        }
+
+        // 第二次点击，执行删除
+        btn.disabled = true;
+        btn.innerText = "删除中...";
+        btn.style.backgroundColor = "#dc3545"; 
+        btn.style.color = "#fff";
+
+        try {
+            const res = await fetch('/api/admin/delete', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    code: sessionCode,
+                    tg_id: tgId
+                })
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                delete globalPerms[tgId]; // 从内存中清除
+                updateUserDropdown(); // 刷新下拉菜单
+                
+                // 重置所有输入框状态
+                document.getElementById('targetTgId').value = '';
+                document.getElementById('maxChangesInput').value = 0;
+                renderQuotaDisplay(0, 0);
+                renderServerList([]);
+                
+                showMsg('sysMsg', '✅ 客户已成功删除！', true);
+            } else {
+                showMsg('sysMsg', '❌ 删除失败: ' + (data.error ? escapeHTML(data.error) : '未知错误'), false);
+            }
+        } catch (e) {
+            showMsg('sysMsg', '❌ 网络错误，无法连接服务器', false);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "🗑️ 删除客户";
         }
     }
 
@@ -302,7 +381,7 @@
 
                 showMsg('sysMsg', isUpdate ? '✅ 客户数据更新成功！' : '✅ 新客户授权成功！', true);
             } else {
-                showMsg('sysMsg', '❌ 保存失败: ' + data.error, false);
+                showMsg('sysMsg', '❌ 保存失败: ' + escapeHTML(data.error), false);
             }
         } catch (e) {
             showMsg('sysMsg', '❌ 网络错误，无法连接服务器', false);
