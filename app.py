@@ -118,7 +118,6 @@ def change_oracle_ip(target_ocid):
         new_ip = vnc_client.create_public_ip(create_info).data.ip_address
         return old_ip, new_ip
     except Exception as e:
-        # 已彻底移除可能引起代码截断的非法符号
         report = f"⚠️ **OCI 报错详情**\n\n`{str(e)}`\n\n实例ID: `{target_ocid}`"
         send_tg_message(ADMIN_ID, report)
         return None, None
@@ -131,7 +130,6 @@ def is_auth(uid):
     return uid == str(ADMIN_ID) or uid in load_permissions()
 
 def check_expiration(uid, u_data):
-    """检查是否过期，如果过期发送提示并返回 True"""
     exp_str = u_data.get('expire_time', '')
     if exp_str:
         try:
@@ -183,7 +181,6 @@ def user_menu(message):
     uid = str(message.chat.id)
     perms = load_permissions().get(uid, {})
     
-    # 检查到期
     if uid != str(ADMIN_ID) and check_expiration(uid, perms): return
 
     ocids = perms.get('ocids', [])
@@ -209,7 +206,6 @@ def handle_ip_btn(call):
     perms = load_permissions()
     u_data = perms.get(uid, {})
     
-    # 换IP前再次检查到期
     if uid != str(ADMIN_ID) and check_expiration(uid, u_data):
         bot.answer_callback_query(call.id, "服务已到期", show_alert=True)
         return
@@ -226,15 +222,29 @@ def handle_ip_btn(call):
     bot.edit_message_text(f"⏳ 正在请求 API 更换 `{s_name}` IP...", chat_id=uid, message_id=call.message.message_id)
     
     old, new = change_oracle_ip(target_ocid)
+    
+    # 获取并计算当前剩余次数，用于向管理员推送
+    rem = max(u_data.get('max_changes', 0) - u_data.get('used_changes', 0), 0)
+    
     if new:
         perms[uid]['used_changes'] += 1
         save_permissions(perms)
         log_change(uid, s_name, old, new)
-        bot.edit_message_text(f"✅ **更换成功！**\n🌐 新IP: `{new}`\n📊 剩余: `{perms[uid]['max_changes'] - perms[uid]['used_changes']}` 次", chat_id=uid, message_id=call.message.message_id, parse_mode="Markdown")
-        send_tg_message(ADMIN_ID, f"🟢 **换IP通知**\n用户: `{uid}`\n节点: `{s_name}`\n新IP: `{new}`")
+        
+        # 重新计算扣除后的剩余次数
+        rem = max(perms[uid].get('max_changes', 0) - perms[uid].get('used_changes', 0), 0)
+        
+        bot.edit_message_text(f"✅ **更换成功！**\n🌐 新IP: `{new}`\n📊 剩余: `{rem}` 次", chat_id=uid, message_id=call.message.message_id, parse_mode="Markdown")
+        
+        # 成功推送给管理员
+        admin_msg = f"🟢 **客户换IP (成功)**\n👤 客户 ID: `{uid}`\n🖥️ 节点: `{s_name}`\n🌐 新IP: `{new}`\n📊 剩余次数: `{rem}` 次"
+        send_tg_message(ADMIN_ID, admin_msg)
     else:
         bot.edit_message_text("❌ 更换失败，请检查管理员通知或稍后再试。", chat_id=uid, message_id=call.message.message_id)
-        send_tg_message(ADMIN_ID, f"🔴 **换IP失败**\n用户: `{uid}`\n节点: `{s_name}`")
+        
+        # 失败推送给管理员
+        admin_msg = f"🔴 **客户换IP (失败)**\n👤 客户 ID: `{uid}`\n🖥️ 节点: `{s_name}`\n❌ 原因: 甲骨文API拒绝或调用频繁\n📊 剩余次数: `{rem}` 次\n💡 本次操作未扣除客户额度。"
+        send_tg_message(ADMIN_ID, admin_msg)
 
 # --- 定时提醒任务：到期提前6, 4, 2天通知 ---
 def reminder_loop():
@@ -243,7 +253,6 @@ def reminder_loop():
         try:
             now = get_bj_now()
             today_str = now.strftime("%Y-%m-%d")
-            # 每天北京时间中午 12 点进行通知
             if last_check_date != today_str and now.hour >= 12:
                 perms = load_permissions()
                 for uid, data in perms.items():
@@ -263,7 +272,7 @@ def reminder_loop():
                         except Exception: pass
                 last_check_date = today_str
         except Exception: pass
-        time.sleep(3600) # 每小时检查一次是否到达 12 点
+        time.sleep(3600) 
 
 # 启动轮询与提醒线程
 threading.Thread(target=lambda: bot.infinity_polling(timeout=20), daemon=True).start()
