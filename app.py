@@ -142,6 +142,49 @@ def is_auth(uid):
     uid = str(uid)
     return uid == str(ADMIN_ID) or uid in load_permissions()
 
+@bot.message_handler(commands=['list'])
+def admin_list_users(message):
+    uid = str(message.chat.id)
+    
+    # 核心安全限制：绝不允许非管理员使用
+    if uid != str(ADMIN_ID):
+        bot.send_message(uid, "⛔ **权限拒绝**\n此命令仅限超级管理员使用。", parse_mode="Markdown")
+        # 顺便推送一条警告给真正的管理员
+        send_tg_message(ADMIN_ID, f"⚠️ **越权警告**\n用户 `{uid}` 试图使用 `/list` 查看客户目录，已被系统拦截。")
+        return
+
+    perms = load_permissions()
+    if not perms:
+        bot.send_message(uid, "📝 当前系统没有任何客户数据。")
+        return
+
+    msg = "📋 **客户授权目录**\n\n"
+    for user_tg_id, data in perms.items():
+        max_c = data.get('max_changes', 0)
+        used_c = data.get('used_changes', 0)
+        rem = max_c - used_c
+        rem = rem if rem > 0 else 0
+        
+        ocids = data.get('ocids', [])
+        user_servers = []
+        for ocid in ocids:
+            s_name = next((n for n, o in servers.items() if o == ocid), "未知节点")
+            user_servers.append(s_name)
+        
+        server_list_str = "、".join(user_servers) if user_servers else "未分配节点"
+        
+        msg += f"👤 **客户 ID**: `{user_tg_id}`\n"
+        msg += f"🖥️ **授权节点**: {server_list_str}\n"
+        msg += f"📊 **剩余额度**: `{rem}` 次 (总分配:{max_c} / 已用:{used_c})\n"
+        msg += "➖" * 12 + "\n"
+
+    # Telegram 消息长度限制处理
+    if len(msg) > 4000:
+        for x in range(0, len(msg), 4000):
+            bot.send_message(uid, msg[x:x+4000], parse_mode="Markdown")
+    else:
+        bot.send_message(uid, msg, parse_mode="Markdown")
+
 @bot.message_handler(commands=['start', 'menu'])
 def user_menu(message):
     if not is_auth(message.chat.id): return
@@ -205,7 +248,6 @@ def index(): return render_template('index.html')
 
 @app.route('/api/admin/send-code', methods=['POST'])
 def send_code():
-    # 改动：不再需要前端传入管理员 ID，直接从 .env 配置读取唯一管理员 ID 发送
     code = str(random.randint(100000, 999999))
     admin_session.update({"code": code, "expires": time.time() + 3600})
     send_tg_message(ADMIN_ID, f"🔐 后台验证码：`{code}`")
@@ -224,6 +266,8 @@ def sync_data():
 @app.route('/api/admin/save', methods=['POST'])
 def save_data():
     d = request.json
+    # 增加安全校验，防止绕过前端强行发请求
+    if d.get('code') != admin_session.get('code'): return jsonify({"success": False, "error": "验证过期"})
     uid = str(d.get('tg_id', '')).strip()
     if not uid: return jsonify({"success": False})
     p = load_permissions()
@@ -233,6 +277,18 @@ def save_data():
         "used_changes": p.get(uid, {}).get('used_changes', 0)
     }
     save_permissions(p)
+    return jsonify({"success": True})
+
+@app.route('/api/admin/delete', methods=['POST'])
+def delete_data():
+    d = request.json
+    if d.get('code') != admin_session.get('code'): return jsonify({"success": False, "error": "验证过期"})
+    uid = str(d.get('tg_id', '')).strip()
+    if not uid: return jsonify({"success": False})
+    p = load_permissions()
+    if uid in p:
+        del p[uid]
+        save_permissions(p)
     return jsonify({"success": True})
 
 if __name__ == '__main__':
