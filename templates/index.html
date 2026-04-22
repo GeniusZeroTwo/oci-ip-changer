@@ -32,14 +32,13 @@
 
 <div class="container" id="loginArea">
     <h2>后台安全登录</h2>
-    <div class="group">
-        <label>管理员 Telegram ID</label>
-        <input type="number" id="adminIdInput" placeholder="输入 .env 中的 ADMIN_TG_ID 以验证身份">
-        <button id="sendAdminCodeBtn" class="btn-secondary" onclick="sendAdminCode()">获取 TG 验证码</button>
+    <div style="text-align: center; margin-bottom: 20px; color: #666; font-size: 14px;">
+        点击按钮获取动态验证码。系统将自动发送至配置绑定的唯一管理员 Telegram。
     </div>
+    <button id="sendAdminCodeBtn" class="btn-secondary" style="margin-top: 0; margin-bottom: 20px;" onclick="sendAdminCode()">一键获取 TG 验证码</button>
     <div class="group">
         <label>动态验证码 (有效期 1 小时)</label>
-        <input type="number" id="adminCode" placeholder="输入接收到的 6 位验证码">
+        <input type="number" id="adminCode" placeholder="输入接收到的 6 位数字">
     </div>
     <button onclick="login()">登 录 控制台</button>
     <div id="loginMsg"></div>
@@ -52,12 +51,9 @@
     
     <div class="group">
         <label>目标客户的 Telegram ID</label>
-        
-        <!-- 下拉菜单：自动读取并选择已存在的客户 -->
         <select id="existingUserSelect" onchange="selectExistingUser()">
             <option value="">-- 从已保存的客户中选择 (更新老客户) --</option>
         </select>
-        
         <div style="display: flex; gap: 10px;">
             <input type="number" id="targetTgId" placeholder="手动输入新客户ID (添加新客户)">
             <button style="background-color: #6c757d; width: 120px; padding: 0;" onclick="loadUserPerms()">读取信息</button>
@@ -70,10 +66,8 @@
             <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span>
         </label>
         
-        <!-- 隐藏实际用于保存数据的输入框 -->
         <input type="hidden" id="maxChangesInput" value="0">
         
-        <!-- 快捷叠加额度控制台 -->
         <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
@@ -104,21 +98,18 @@
     }
 
     async function sendAdminCode() {
-        const tgId = document.getElementById('adminIdInput').value;
-        if (!tgId) { return showMsg('loginMsg', '请先输入管理员的 Telegram ID', false); }
-        
         const btn = document.getElementById('sendAdminCodeBtn');
         btn.disabled = true; btn.innerText = "发送中...";
         
         try {
             const res = await fetch('/api/admin/send-code', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({tg_id: tgId})
+                body: JSON.stringify({}) // 不再向后端传递 ID，完全由后端读取配置
             });
             const data = await res.json();
             
             if(data.success) {
-                showMsg('loginMsg', '验证码已发送', true);
+                showMsg('loginMsg', '验证码已发送至管理员的 Telegram！', true);
                 let count = 60;
                 const timer = setInterval(() => {
                     btn.innerText = `${count} 秒后重试`; count--;
@@ -215,7 +206,6 @@
         }
     }
 
-    // 渲染额度显示面板
     function renderQuotaDisplay(max, used) {
         const rem = max - used;
         const displayRem = rem > 0 ? rem : 0;
@@ -233,7 +223,6 @@
             renderServerList(userData.ocids);
             showMsg('sysMsg', `已成功加载老客户 ${tgId} 的配置`, true);
         } else {
-            // 新客户默认0次，等待管理员点击充值
             document.getElementById('maxChangesInput').value = 0;
             renderQuotaDisplay(0, 0);
             renderServerList([]);
@@ -241,13 +230,11 @@
         }
     }
 
-    // 【核心】修改额度逻辑：操作会直接反映在“剩余次数”上
     function addTimes(amount) {
         const input = document.getElementById('maxChangesInput');
         let currentMax = parseInt(input.value) || 0;
         let newMax = currentMax + amount;
         
-        // 防止总次数为负数
         if (newMax < 0) newMax = 0;
         input.value = newMax;
         
@@ -259,20 +246,18 @@
         
         renderQuotaDisplay(newMax, used);
         
-        // 增加绿色的闪烁动画反馈
         const display = document.getElementById('quotaDisplay');
         display.style.transition = 'background-color 0.3s';
         display.style.backgroundColor = '#d1e7dd';
         setTimeout(() => display.style.backgroundColor = 'transparent', 400);
     }
 
-    // 自定义增加 (支持正负数)
     function addCustomTimes() {
         const addInput = document.getElementById('customAddInput');
         const amount = parseInt(addInput.value);
         if (!isNaN(amount)) {
             addTimes(amount);
-            addInput.value = ''; // 增加后清空输入框
+            addInput.value = ''; 
         } else {
             showMsg('sysMsg', '请输入有效的数值', false);
         }
