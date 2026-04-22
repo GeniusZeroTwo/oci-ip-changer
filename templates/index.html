@@ -10,7 +10,7 @@
         h2 { margin-top: 0; color: #333; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px;}
         .group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; }
-        input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+        input[type="text"], input[type="password"], input[type="number"], input[type="date"], select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
         select { background-color: #fff; cursor: pointer; margin-bottom: 10px; }
         button { background-color: #0d6efd; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;}
         button:hover { background-color: #0b5ed7; }
@@ -26,6 +26,7 @@
         #msg, #loginMsg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
         .success { color: #198754; } .error { color: #dc3545; }
         .used-info { font-size: 14px; font-weight: bold; color: #198754; margin-top: 5px; display: inline-block; padding: 2px 6px; border-radius: 4px; }
+        .panel { background-color: #f1f8ff; padding: 15px; border-radius: 8px; border: 1px solid #b6d4fe; margin-bottom: 20px; }
     </style>
 </head>
 <body>
@@ -33,7 +34,7 @@
 <div class="container" id="loginArea">
     <h2>后台安全登录</h2>
     <div style="text-align: center; margin-bottom: 20px; color: #666; font-size: 14px;">
-        点击按钮获取动态验证码。系统将自动发送至配置绑定的唯一管理员 Telegram。
+        点击按钮获取动态验证码。系统将自动发送至绑定的管理员 Telegram。
     </div>
     <button id="sendAdminCodeBtn" class="btn-secondary" style="margin-top: 0; margin-bottom: 20px;" onclick="sendAdminCode()">一键获取 TG 验证码</button>
     <div class="group">
@@ -60,29 +61,37 @@
         </div>
     </div>
     
+    <!-- 到期时间设置区 -->
+    <div class="panel group">
+        <label>⏳ 有效期至 (年-月-日 / 北京时间)</label>
+        <input type="date" id="expireTimeInput" title="点击选择年月日，或输入 YYYY-MM-DD">
+        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(30)">+ 1 个月</button>
+            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(90)">+ 1 季度</button>
+            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(365)">+ 1 年</button>
+            <button type="button" style="background-color: #20c997; color: #fff; padding: 8px 12px; width: auto;" onclick="setPermanent()">设为永久</button>
+        </div>
+        <div style="font-size: 12px; color: #666; margin-top: 8px;">💡 留空代表永久有效。系统会在到期前 6、4、2天中午自动发送续期提醒。</div>
+    </div>
+
+    <!-- 额度管理区 -->
     <div class="group">
-        <label>
-            额度管理 
-            <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span>
-        </label>
-        
+        <label>🔢 额度管理 <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span></label>
         <input type="hidden" id="maxChangesInput" value="0">
-        
-        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
             <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(10)">+10 次</button>
             <input type="number" id="customAddInput" placeholder="填写数值" style="padding: 8px; margin: 0; width: 100px;" onkeypress="if(event.key==='Enter') addCustomTimes()">
             <button type="button" style="background-color: #17a2b8; padding: 8px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
         </div>
-        <div style="font-size: 12px; color: #888; margin-top: 8px;">💡 提示：点击按钮直接为客户叠加剩余额度 (填负数可扣除)。操作后请记得点击底部【保存更新】。</div>
     </div>
 
-    <label>授权可操作的服务器 (可多选)</label>
+    <label>💻 授权可操作的服务器 (可多选)</label>
     <div class="server-list" id="serverList"></div>
 
     <div style="display: flex; gap: 10px;">
-        <button id="saveBtn" style="background-color: #198754; flex: 1;" onclick="savePermissions()">💾 保存更新</button>
+        <button id="saveBtn" style="background-color: #198754; flex: 1;" onclick="savePermissions()">💾 保存配置</button>
         <button id="deleteBtn" style="background-color: #dc3545; width: 140px;" onclick="deleteUser()">🗑️ 删除客户</button>
     </div>
     <div id="sysMsg"></div>
@@ -93,12 +102,21 @@
     let globalPerms = {};
     let sessionCode = '';
 
-    // 安全工具函数：防止跨站脚本攻击 (XSS)
     function escapeHTML(str) {
         return String(str).replace(/[&<>'"]/g, match => {
             const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
             return escapeMap[match];
         });
+    }
+
+    // 将 2026-12-31 格式化为 2026年12月31日
+    function formatDateToCN(dateStr) {
+        if (!dateStr) return '永久有效';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            return `${parts[0]}年${parts[1]}月${parts[2]}日`;
+        }
+        return dateStr;
     }
 
     function showMsg(id, text, isSuccess) {
@@ -108,17 +126,34 @@
         setTimeout(() => el.innerText = '', 4000);
     }
 
+    // 日期快捷增加
+    function addDays(days) {
+        let currentVal = document.getElementById('expireTimeInput').value;
+        let dateObj = currentVal ? new Date(currentVal) : new Date(); // 如果没值，从今天算起
+        dateObj.setDate(dateObj.getDate() + days);
+        let yyyy = dateObj.getFullYear();
+        let mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        let dd = String(dateObj.getDate()).padStart(2, '0');
+        
+        const input = document.getElementById('expireTimeInput');
+        input.value = `${yyyy}-${mm}-${dd}`;
+        input.style.backgroundColor = '#d1e7dd';
+        setTimeout(() => input.style.backgroundColor = '#fff', 400);
+    }
+    
+    // 设置永久有效
+    function setPermanent() {
+        document.getElementById('expireTimeInput').value = '';
+    }
+
     async function sendAdminCode() {
         const btn = document.getElementById('sendAdminCodeBtn');
         btn.disabled = true; btn.innerText = "发送中...";
-        
         try {
             const res = await fetch('/api/admin/send-code', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({}) // 不再向后端传递 ID，完全由后端读取配置
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
             });
             const data = await res.json();
-            
             if(data.success) {
                 showMsg('loginMsg', '验证码已发送至管理员的 Telegram！', true);
                 let count = 60;
@@ -131,265 +166,157 @@
                 btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
             }
         } catch(e) {
-            showMsg('loginMsg', '网络请求失败，请检查后端运行状态', false);
+            showMsg('loginMsg', '网络请求失败，请检查后端状态', false);
             btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
         }
     }
 
     async function login() {
         const code = document.getElementById('adminCode').value;
-        if(!code) { return showMsg('loginMsg', '请输入验证码', false); }
-        
+        if(!code) return showMsg('loginMsg', '请输入验证码', false);
         const res = await fetch('/api/admin/data', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({code: code})
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: code})
         });
         const data = await res.json();
-        
         if(data.success) {
-            sessionCode = code;
-            globalServers = data.servers;
-            globalPerms = data.permissions;
+            sessionCode = code; globalServers = data.servers; globalPerms = data.permissions;
             document.getElementById('loginArea').classList.add('hidden');
             document.getElementById('dashboardArea').classList.remove('hidden');
-            
-            updateUserDropdown();
-            renderServerList();
-        } else {
-            showMsg('loginMsg', data.error || '验证失败', false);
-        }
+            updateUserDropdown(); renderServerList();
+        } else { showMsg('loginMsg', data.error || '验证失败', false); }
     }
 
     async function syncServers() {
-        showMsg('sysMsg', '正在向甲骨文云请求数据...', true);
+        showMsg('sysMsg', '正在同步数据...', true);
         const res = await fetch('/api/admin/sync', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({code: sessionCode})
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: sessionCode})
         });
         const data = await res.json();
         if(data.success) {
-            globalServers = data.servers;
-            renderServerList();
-            showMsg('sysMsg', '列表同步成功！', true);
-        } else {
-            showMsg('sysMsg', '同步失败：' + (data.message ? escapeHTML(data.message) : '未知错误'), false);
-        }
+            globalServers = data.servers; renderServerList(); showMsg('sysMsg', '同步成功！', true);
+        } else { showMsg('sysMsg', '同步失败', false); }
     }
 
     function updateUserDropdown() {
         const select = document.getElementById('existingUserSelect');
         select.innerHTML = '<option value="">-- 从已保存的客户中选择 (更新老客户) --</option>';
-        
         for (const tgId in globalPerms) {
             const used = globalPerms[tgId].used_changes || 0;
             const max = globalPerms[tgId].max_changes || 0;
-            const remaining = max - used;
-            // 修复潜在的 XSS
+            // 获取并格式化为中文日期
+            const expDisplay = formatDateToCN(globalPerms[tgId].expire_time);
             const safeTgId = escapeHTML(tgId);
-            select.innerHTML += `<option value="${safeTgId}">客户: ${safeTgId} (剩余额度: ${remaining > 0 ? remaining : 0} 次)</option>`;
+            select.innerHTML += `<option value="${safeTgId}">客户: ${safeTgId} (剩余: ${Math.max(max-used, 0)}次 | ${expDisplay})</option>`;
         }
     }
 
     function selectExistingUser() {
         const select = document.getElementById('existingUserSelect');
         const input = document.getElementById('targetTgId');
-        if (select.value) {
-            input.value = select.value;
-            loadUserPerms(); 
-        }
+        if (select.value) { input.value = select.value; loadUserPerms(); }
     }
 
     function renderServerList(checkedOcids = []) {
         const listDiv = document.getElementById('serverList');
         listDiv.innerHTML = '';
-        
-        if (Object.keys(globalServers).length === 0) {
-            listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击上方同步按钮。</div>';
-            return;
-        }
-
+        if (Object.keys(globalServers).length === 0) return listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击同步。</div>';
         for (const [name, ocid] of Object.entries(globalServers)) {
             const isChecked = checkedOcids.includes(ocid) ? 'checked' : '';
-            // 修复潜在的 XSS
-            const safeOcid = escapeHTML(ocid);
-            const safeName = escapeHTML(name);
-            listDiv.innerHTML += `
-                <div class="server-item">
-                    <input type="checkbox" id="chk_${safeOcid}" value="${safeOcid}" ${isChecked}>
-                    <label style="margin:0; cursor:pointer;" for="chk_${safeOcid}">${safeName}</label>
-                </div>
-            `;
+            listDiv.innerHTML += `<div class="server-item"><input type="checkbox" id="chk_${escapeHTML(ocid)}" value="${escapeHTML(ocid)}" ${isChecked}><label style="margin:0; cursor:pointer;" for="chk_${escapeHTML(ocid)}">${escapeHTML(name)}</label></div>`;
         }
     }
 
     function renderQuotaDisplay(max, used) {
-        const rem = max - used;
-        const displayRem = rem > 0 ? rem : 0;
+        const displayRem = Math.max(max - used, 0);
         document.getElementById('quotaDisplay').innerText = `(当前剩余：${displayRem} 次 | 总分配：${max} | 已用：${used})`;
     }
 
     function loadUserPerms() {
         const tgId = document.getElementById('targetTgId').value.trim();
         if(!tgId) return;
-        
         let userData = globalPerms[tgId];
         if (userData) {
             document.getElementById('maxChangesInput').value = userData.max_changes;
+            document.getElementById('expireTimeInput').value = userData.expire_time || ''; // 回显到期时间
             renderQuotaDisplay(userData.max_changes, userData.used_changes);
             renderServerList(userData.ocids);
-            showMsg('sysMsg', `已成功加载老客户 ${escapeHTML(tgId)} 的配置`, true);
+            showMsg('sysMsg', `已加载老客户 ${escapeHTML(tgId)} 的配置`, true);
         } else {
             document.getElementById('maxChangesInput').value = 0;
-            renderQuotaDisplay(0, 0);
-            renderServerList([]);
-            showMsg('sysMsg', `这是一个新客户，请配置权限后点击保存`, true);
+            document.getElementById('expireTimeInput').value = ''; 
+            renderQuotaDisplay(0, 0); renderServerList([]);
+            showMsg('sysMsg', `这是新客户，请配置信息后点击保存`, true);
         }
     }
 
     function addTimes(amount) {
         const input = document.getElementById('maxChangesInput');
-        let currentMax = parseInt(input.value) || 0;
-        let newMax = currentMax + amount;
-        
-        if (newMax < 0) newMax = 0;
+        let newMax = Math.max((parseInt(input.value) || 0) + amount, 0);
         input.value = newMax;
-        
         const tgId = document.getElementById('targetTgId').value.trim();
-        let used = 0;
-        if (tgId && globalPerms[tgId]) {
-            used = globalPerms[tgId].used_changes || 0;
-        }
-        
+        let used = (tgId && globalPerms[tgId]) ? (globalPerms[tgId].used_changes || 0) : 0;
         renderQuotaDisplay(newMax, used);
         
         const display = document.getElementById('quotaDisplay');
-        display.style.transition = 'background-color 0.3s';
-        display.style.backgroundColor = '#d1e7dd';
+        display.style.transition = 'background-color 0.3s'; display.style.backgroundColor = '#d1e7dd';
         setTimeout(() => display.style.backgroundColor = 'transparent', 400);
     }
 
     function addCustomTimes() {
         const addInput = document.getElementById('customAddInput');
         const amount = parseInt(addInput.value);
-        if (!isNaN(amount)) {
-            addTimes(amount);
-            addInput.value = ''; 
-        } else {
-            showMsg('sysMsg', '请输入有效的数值', false);
-        }
+        if (!isNaN(amount)) { addTimes(amount); addInput.value = ''; }
     }
 
-    // 【新增】删除客户的交互逻辑（双击防误触设计）
     async function deleteUser() {
-        const tgIdInput = document.getElementById('targetTgId');
-        const tgId = tgIdInput.value.trim();
-        if(!tgId) return showMsg('sysMsg', '错误：请先选择或输入要删除的客户 ID', false);
-
+        const tgId = document.getElementById('targetTgId').value.trim();
+        if(!tgId) return showMsg('sysMsg', '请先选择要删除的客户', false);
         const btn = document.getElementById('deleteBtn');
-        
-        // 第一次点击变为警告状态
         if (btn.innerText === "🗑️ 删除客户") {
-            btn.innerText = "⚠️ 再次点击确认";
-            btn.style.backgroundColor = "#ffc107"; // 变黄
-            btn.style.color = "#000";
-            
-            // 3秒后如果没有确认，恢复原状
-            setTimeout(() => {
-                if (btn.innerText === "⚠️ 再次点击确认") {
-                    btn.innerText = "🗑️ 删除客户";
-                    btn.style.backgroundColor = "#dc3545"; // 恢复红色
-                    btn.style.color = "#fff";
-                }
-            }, 3000);
+            btn.innerText = "⚠️ 再次点击确认"; btn.style.backgroundColor = "#ffc107"; btn.style.color = "#000";
+            setTimeout(() => { if (btn.innerText === "⚠️ 再次点击确认") { btn.innerText = "🗑️ 删除客户"; btn.style.backgroundColor = "#dc3545"; btn.style.color = "#fff"; } }, 3000);
             return;
         }
-
-        // 第二次点击，执行删除
-        btn.disabled = true;
-        btn.innerText = "删除中...";
-        btn.style.backgroundColor = "#dc3545"; 
-        btn.style.color = "#fff";
-
+        btn.disabled = true; btn.innerText = "删除中...";
         try {
-            const res = await fetch('/api/admin/delete', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    code: sessionCode,
-                    tg_id: tgId
-                })
-            });
-            const data = await res.json();
-            
-            if(data.success) {
-                delete globalPerms[tgId]; // 从内存中清除
-                updateUserDropdown(); // 刷新下拉菜单
-                
-                // 重置所有输入框状态
-                document.getElementById('targetTgId').value = '';
-                document.getElementById('maxChangesInput').value = 0;
-                renderQuotaDisplay(0, 0);
-                renderServerList([]);
-                
-                showMsg('sysMsg', '✅ 客户已成功删除！', true);
-            } else {
-                showMsg('sysMsg', '❌ 删除失败: ' + (data.error ? escapeHTML(data.error) : '未知错误'), false);
+            const res = await fetch('/api/admin/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ code: sessionCode, tg_id: tgId }) });
+            if((await res.json()).success) {
+                delete globalPerms[tgId]; updateUserDropdown();
+                document.getElementById('targetTgId').value = ''; document.getElementById('maxChangesInput').value = 0; document.getElementById('expireTimeInput').value = '';
+                renderQuotaDisplay(0, 0); renderServerList([]);
+                showMsg('sysMsg', '✅ 客户已删除！', true);
             }
-        } catch (e) {
-            showMsg('sysMsg', '❌ 网络错误，无法连接服务器', false);
-        } finally {
-            btn.disabled = false;
-            btn.innerText = "🗑️ 删除客户";
-        }
+        } finally { btn.disabled = false; btn.innerText = "🗑️ 删除客户"; btn.style.backgroundColor = "#dc3545"; btn.style.color = "#fff"; }
     }
 
     async function savePermissions() {
-        const tgIdInput = document.getElementById('targetTgId');
-        const tgId = tgIdInput.value.trim();
+        const tgId = document.getElementById('targetTgId').value.trim();
         if(!tgId) return showMsg('sysMsg', '错误：Telegram ID 不能为空', false);
-
-        const maxChanges = parseInt(document.getElementById('maxChangesInput').value) || 0;
-        const selectedOcids = Array.from(document.querySelectorAll('.server-list input:checked')).map(cb => cb.value);
-
-        const btn = document.getElementById('saveBtn');
-        btn.disabled = true;
-        btn.innerText = "正在保存...";
-
+        const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.innerText = "正在保存...";
         try {
             const res = await fetch('/api/admin/save', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    code: sessionCode,
-                    tg_id: tgId,
-                    ocids: selectedOcids,
-                    max_changes: maxChanges
+                    code: sessionCode, tg_id: tgId,
+                    ocids: Array.from(document.querySelectorAll('.server-list input:checked')).map(cb => cb.value),
+                    max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0,
+                    expire_time: document.getElementById('expireTimeInput').value || ""  // 提交到期时间
                 })
             });
-            const data = await res.json();
-            
-            if(data.success) {
-                const isUpdate = !!globalPerms[tgId];
-                const usedChanges = isUpdate ? globalPerms[tgId].used_changes : 0;
-                
+            if((await res.json()).success) {
+                const used = globalPerms[tgId] ? globalPerms[tgId].used_changes : 0;
                 globalPerms[tgId] = { 
-                    ocids: selectedOcids, 
-                    max_changes: maxChanges, 
-                    used_changes: usedChanges 
+                    ocids: Array.from(document.querySelectorAll('.server-list input:checked')).map(cb => cb.value), 
+                    max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0, 
+                    used_changes: used,
+                    expire_time: document.getElementById('expireTimeInput').value || ""
                 };
-                
-                updateUserDropdown(); 
-                document.getElementById('existingUserSelect').value = tgId;
-
-                showMsg('sysMsg', isUpdate ? '✅ 客户数据更新成功！' : '✅ 新客户授权成功！', true);
-            } else {
-                showMsg('sysMsg', '❌ 保存失败: ' + escapeHTML(data.error), false);
+                updateUserDropdown(); document.getElementById('existingUserSelect').value = tgId;
+                showMsg('sysMsg', '✅ 保存成功！', true);
             }
-        } catch (e) {
-            showMsg('sysMsg', '❌ 网络错误，无法连接服务器', false);
-        } finally {
-            btn.disabled = false;
-            btn.innerText = "💾 保存更新";
-        }
+        } finally { btn.disabled = false; btn.innerText = "💾 保存配置"; }
     }
 </script>
 </body>
 </html>
+
