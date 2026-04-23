@@ -4,6 +4,7 @@ import time
 import random
 import threading
 import hashlib
+import secrets  # 新增：用于安全的字符串比较
 import oci
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -33,7 +34,8 @@ OCI_CONFIG = {
 # 内存变量与时区 (北京时间 UTC+8)
 BJ_TZ = timezone(timedelta(hours=8))
 servers = {}
-admin_session = {"code": None, "expires": 0}
+# 新增 attempts 字段用于防爆破
+admin_session = {"code": None, "expires": 0, "attempts": 0}
 STATS_FILE = 'stats.json'
 PERMS_FILE = 'permissions.json'
 
@@ -76,6 +78,39 @@ def send_tg_message(chat_id, text):
     try:
         bot.send_message(chat_id, text, parse_mode="Markdown")
     except: pass
+
+# --- 安全验证函数 (新增) ---
+def verify_admin(req_data):
+    """
+    后台安全验证核心函数：
+    包含空值检查、防爆破限制、过期检查以及恒定时间比较防时序攻击。
+    """
+    if not req_data:
+        return False
+        
+    req_code = req_data.get('code')
+    actual_code = admin_session.get('code')
+    expires = admin_session.get('expires', 0)
+    
+    # 1. 防空值绕过：请求验证码或系统验证码为空时，直接拒绝
+    if not req_code or not actual_code:
+        return False
+        
+    # 2. 防爆破：错误尝试超过 5 次，锁定直至重新发送验证码
+    if admin_session.get('attempts', 0) >= 5:
+        return False
+        
+    # 3. 检查是否过期
+    if time.time() > expires:
+        return False
+        
+    # 4. 安全比较验证码 (防止时序攻击)
+    if secrets.compare_digest(str(req_code), str(actual_code)):
+        admin_session['attempts'] = 0  # 验证成功，重置错误次数
+        return True
+    else:
+        admin_session['attempts'] += 1  # 验证失败，增加错误次数
+        return False
 
 # --- OCI 核心逻辑 ---
 def fetch_oci_instances():
@@ -285,26 +320,33 @@ def index(): return render_template('index.html')
 @app.route('/api/admin/send-code', methods=['POST'])
 def send_code():
     code = str(random.randint(100000, 999999))
-    admin_session.update({"code": code, "expires": time.time() + 3600})
+    # 更新生成代码：重置 attempts 并且保留 3600 秒的有效期
+    admin_session.update({"code": code, "expires": time.time() + 3600, "attempts": 0})
     send_tg_message(ADMIN_ID, f"🔐 后台验证码：`{code}`")
     return jsonify({"success": True})
 
 @app.route('/api/admin/data', methods=['POST'])
 def get_data():
-    if request.json.get('code') != admin_session.get('code'): return jsonify({"success": False})
+    if not verify_admin(request.json): 
+        return jsonify({"success": False, "error": "验证失败、已过期或尝试次数过多"})
     return jsonify({"success": True, "servers": servers, "permissions": load_permissions()})
 
 @app.route('/api/admin/sync', methods=['POST'])
 def sync_data():
+    if not verify_admin(request.json):
+        return jsonify({"success": False, "error": "验证失败、已过期或尝试次数过多"})
     fetch_oci_instances()
     return jsonify({"success": True, "servers": servers})
 
 @app.route('/api/admin/save', methods=['POST'])
 def save_data():
     d = request.json
-    if d.get('code') != admin_session.get('code'): return jsonify({"success": False, "error": "验证过期"})
+    if not verify_admin(d): 
+        return jsonify({"success": False, "error": "验证失败、已过期或尝试次数过多"})
+    
     uid = str(d.get('tg_id', '')).strip()
-    if not uid: return jsonify({"success": False})
+    if not uid: return jsonify({"success": False, "error": "TG ID 不能为空"})
+    
     p = load_permissions()
     p[uid] = {
         "ocids": d.get('ocids', []),
@@ -318,9 +360,12 @@ def save_data():
 @app.route('/api/admin/delete', methods=['POST'])
 def delete_data():
     d = request.json
-    if d.get('code') != admin_session.get('code'): return jsonify({"success": False, "error": "验证过期"})
+    if not verify_admin(d): 
+        return jsonify({"success": False, "error": "验证失败、已过期或尝试次数过多"})
+        
     uid = str(d.get('tg_id', '')).strip()
-    if not uid: return jsonify({"success": False})
+    if not uid: return jsonify({"success": False, "error": "TG ID 不能为空"})
+    
     p = load_permissions()
     if uid in p:
         del p[uid]
