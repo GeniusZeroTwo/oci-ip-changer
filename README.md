@@ -63,23 +63,13 @@ source venv/bin/activate
 
 ```bash
 pip install -r requirements.txt
+pip install pyyaml
 ```
 
 ---
-
-### 3) 配置核心安全信息（`.env`）
-
-复制配置模板：
-
+# 将其添加到 requirements.txt 中，方便以后迁移
 ```bash
-cp .env.example .env
-```
-
-编辑配置文件：
-
-```bash
-nano .env
-```
+echo "pyyaml" >> /root/oci-ip-changer/requirements.txt
 
 请按注释填写真实参数：
 
