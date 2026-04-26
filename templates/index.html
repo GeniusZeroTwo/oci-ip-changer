@@ -6,7 +6,11 @@
     <title>OCI 客户授权管理系统</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;}
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        /* 容器默认宽度扩大，适应PC */
+        .container { max-width: 1200px; width: 98%; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); box-sizing: border-box; }
+        /* 登录框保持窄版居中 */
+        #loginArea { max-width: 450px; margin-top: 50px; }
+        
         h2 { margin-top: 0; color: #333; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px;}
         .group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: bold; color: #555; }
@@ -18,15 +22,29 @@
         button.btn-secondary { background-color: #6c757d; margin-top: 10px; }
         button.btn-secondary:hover { background-color: #5a6268; }
         button.btn-warning { background-color: #ffc107; color: #000; margin-bottom: 15px;}
+        
         .server-list { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; max-height: 400px; overflow-y: auto; margin-bottom: 20px;}
         .server-item { display: flex; flex-wrap: wrap; align-items: center; padding: 12px 10px; border-bottom: 1px solid #eee; }
         .server-item:last-child { border-bottom: none; }
         .server-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 12px; cursor: pointer;}
         .hidden { display: none !important; }
-        #msg, #loginMsg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
+        #msg, #loginMsg, #sysMsg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
         .success { color: #198754; } .error { color: #dc3545; word-break: break-all; }
         .used-info { font-size: 14px; font-weight: bold; color: #198754; margin-top: 5px; display: inline-block; padding: 2px 6px; border-radius: 4px; }
         .panel { background-color: #f1f8ff; padding: 15px; border-radius: 8px; border: 1px solid #b6d4fe; margin-bottom: 20px; }
+
+        /* 响应式双栏布局核心代码 */
+        .dashboard-grid { display: flex; flex-direction: column; gap: 30px; }
+        .col-left { display: flex; flex-direction: column; gap: 0; }
+        .col-right { display: flex; flex-direction: column; gap: 0; }
+        
+        /* 当屏幕宽度大于 850px 时，切换为双栏模式 */
+        @media (min-width: 850px) {
+            .dashboard-grid { flex-direction: row; align-items: stretch; }
+            .col-left { width: 400px; flex-shrink: 0; }
+            .col-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+            .server-list { flex: 1; max-height: calc(100vh - 300px); margin-bottom: 15px;} /* PC端列表高度自适应 */
+        }
     </style>
 </head>
 <body>
@@ -46,59 +64,76 @@
 </div>
 
 <div class="container hidden" id="dashboardArea">
-    <h2>🛡️ OCI 授权与额度分配</h2>
+    <h2>🛡️ OCI 授权与监控分配</h2>
     
-    <button class="btn-warning" onclick="syncServers()">🔄 从甲骨文云同步最新服务器列表</button>
-    
-    <div class="group">
-        <label>目标客户的 Telegram ID</label>
-        <select id="existingUserSelect" onchange="selectExistingUser()">
-            <option value="">-- 从已保存的客户中选择 (更新老客户) --</option>
-        </select>
-        <div style="display: flex; gap: 10px;">
-            <input type="number" id="targetTgId" placeholder="手动输入新客户ID (添加新客户)" onkeypress="if(event.key==='Enter') loadUserPerms()">
-            <button style="background-color: #6c757d; width: 120px; padding: 0;" onclick="loadUserPerms()">读取信息</button>
+    <div class="dashboard-grid">
+        
+        <div class="col-left">
+            <button class="btn-warning" onclick="syncServers()">🔄 从甲骨文云同步最新服务器列表</button>
+            
+            <div class="group">
+                <label>目标客户的 Telegram ID</label>
+                <select id="existingUserSelect" onchange="selectExistingUser()">
+                    <option value="">-- 从已保存的客户中选择 (更新老客户) --</option>
+                </select>
+                <div style="display: flex; gap: 10px;">
+                    <input type="number" id="targetTgId" placeholder="手动输入新客户ID" onkeypress="if(event.key==='Enter') loadUserPerms()">
+                    <button style="background-color: #6c757d; width: 100px; padding: 0;" onclick="loadUserPerms()">读取</button>
+                </div>
+            </div>
+
+            <div class="group panel" style="background-color: #fff8f1; border-color: #ffe8d6;">
+                <label>🔢 全局换IP额度管理 <span class="used-info" id="quotaDisplay" style="display:block; margin-top:5px; padding:0;">(当前剩余：0 次 | 总分配：0 | 已用：0)</span></label>
+                <input type="hidden" id="maxChangesInput" value="0">
+                <div style="display: flex; gap: 6px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 10px; width: auto;" onclick="addTimes(1)">+1 次</button>
+                    <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 10px; width: auto;" onclick="addTimes(5)">+5 次</button>
+                    <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 10px; width: auto;" onclick="addTimes(10)">+10 次</button>
+                    <input type="number" id="customAddInput" placeholder="自定义" style="padding: 8px; margin: 0; width: 80px;" onkeypress="if(event.key==='Enter') addCustomTimes()">
+                    <button type="button" style="background-color: #e35d00; padding: 8px 10px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
+                </div>
+                <div style="font-size: 12px; color: #666; margin-top: 8px;">💡 额度为该客户名下所有节点共享的总次数。</div>
+            </div>
+            
+            <div class="panel group" style="background-color: #f8f9fa; border-color: #dee2e6; margin-bottom: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label style="margin: 0;">🌐 当月出站流量监控</label>
+                    <button type="button" class="btn-secondary" style="width: auto; padding: 4px 10px; margin: 0; font-size: 12px;" onclick="loadTraffic(true)">🔄 强刷</button>
+                </div>
+                <div id="trafficList" style="margin-top: 15px; font-size: 14px; color: #555;">
+                    加载中...
+                </div>
+            </div>
         </div>
-    </div>
-    
-    <!-- 额度管理区 -->
-    <div class="group panel" style="background-color: #fff8f1; border-color: #ffe8d6;">
-        <label>🔢 全局换IP额度管理 <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span></label>
-        <input type="hidden" id="maxChangesInput" value="0">
-        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
-            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
-            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
-            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(10)">+10 次</button>
-            <input type="number" id="customAddInput" placeholder="填写数值" style="padding: 8px; margin: 0; width: 100px;" onkeypress="if(event.key==='Enter') addCustomTimes()">
-            <button type="button" style="background-color: #e35d00; padding: 8px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
+
+        <div class="col-right">
+            <label style="display: flex; justify-content: space-between; align-items: flex-end;">
+                <span>💻 授权服务器与电源管理</span>
+            </label>
+            
+            <div style="background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px;">
+                <span style="font-weight:bold; color:#555;">批量续费 (勾选下方节点):</span>
+                <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(30)">+1个月</button>
+                <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(90)">+1季度</button>
+                <button type="button" style="background-color: #20c997; color: #fff; padding: 6px 10px; width: auto;" onclick="setPermanentSelected()">设为永久</button>
+            </div>
+
+            <div class="server-list" id="serverList"></div>
+
+            <div style="display: flex; gap: 10px; margin-top: auto;">
+                <button id="saveBtn" style="background-color: #198754; flex: 1;" onclick="savePermissions()">💾 保存当前客户配置</button>
+                <button id="deleteBtn" style="background-color: #dc3545; width: 140px;" onclick="deleteUser()">🗑️ 删除客户</button>
+            </div>
+            
+            <div id="sysMsg"></div>
         </div>
-        <div style="font-size: 12px; color: #666; margin-top: 8px;">💡 额度为该客户名下所有节点共享的总次数。</div>
+        
     </div>
-
-    <label style="display: flex; justify-content: space-between; align-items: flex-end;">
-        <span>💻 授权服务器与独立到期日设置</span>
-    </label>
-    
-    <!-- 快捷续期工具栏 -->
-    <div style="background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px;">
-        <span style="font-weight:bold; color:#555;">一键续费 (仅对已勾选节点生效):</span>
-        <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(30)">+1个月</button>
-        <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(90)">+1季度</button>
-        <button type="button" style="background-color: #20c997; color: #fff; padding: 6px 10px; width: auto;" onclick="setPermanentSelected()">设为永久</button>
-    </div>
-
-    <!-- 动态渲染的服务器列表 -->
-    <div class="server-list" id="serverList"></div>
-
-    <div style="display: flex; gap: 10px;">
-        <button id="saveBtn" style="background-color: #198754; flex: 1;" onclick="savePermissions()">💾 保存配置</button>
-        <button id="deleteBtn" style="background-color: #dc3545; width: 140px;" onclick="deleteUser()">🗑️ 删除客户</button>
-    </div>
-    <div id="sysMsg"></div>
 </div>
 
 <script>
-    let globalServers = {};
+    // JS逻辑与之前完全一致，仅UI结构发生了改变
+    let globalInstances = {};
     let globalPerms = {};
     let sessionCode = '';
 
@@ -116,7 +151,6 @@
         setTimeout(() => el.innerText = '', 8000); 
     }
 
-    // 复选框状态联动显示日期框
     function toggleDate(ocid) {
         const cb = document.getElementById('chk_' + ocid);
         const dt = document.getElementById('date_' + ocid);
@@ -124,11 +158,9 @@
         else dt.classList.add('hidden');
     }
 
-    // 批量为已勾选的节点增加天数
     function addDaysToSelected(days) {
         const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]:checked');
         if (checkboxes.length === 0) return alert('请先勾选需要续期的服务器！');
-        
         checkboxes.forEach(cb => {
             const ocid = cb.value;
             const input = document.getElementById('date_' + escapeHTML(ocid));
@@ -145,7 +177,6 @@
         });
     }
     
-    // 批量设为永久
     function setPermanentSelected() {
         const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]:checked');
         if (checkboxes.length === 0) return alert('请先勾选需要续期的服务器！');
@@ -178,7 +209,7 @@
                 btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
             }
         } catch(e) {
-            showMsg('loginMsg', '网络请求失败，请检查后端状态', false);
+            showMsg('loginMsg', '网络请求失败', false);
             btn.disabled = false; btn.innerText = "一键获取 TG 验证码";
         }
     }
@@ -191,11 +222,116 @@
         });
         const data = await res.json();
         if(data.success) {
-            sessionCode = code; globalServers = data.servers; globalPerms = data.permissions;
+            sessionCode = code; globalInstances = data.instances; globalPerms = data.permissions;
             document.getElementById('loginArea').classList.add('hidden');
             document.getElementById('dashboardArea').classList.remove('hidden');
             updateUserDropdown(); renderServerList();
+            loadTraffic(false);
         } else { showMsg('loginMsg', data.error || '验证失败', false); }
+    }
+
+    async function doInstanceAction(ocid, action) {
+        showMsg('sysMsg', action === 'START' ? '⏳ 正在发送开机指令，请耐心等待...' : '⏳ 正在发送关机指令，请耐心等待...', true);
+        try {
+            const res = await fetch('/api/admin/instance-action', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: sessionCode, ocid: ocid, action: action})
+            });
+            const data = await res.json();
+            if(data.success) {
+                showMsg('sysMsg', '✅ 电源指令发送成功！状态将在几秒后自动刷新。', true);
+                setTimeout(() => syncServers(), 3000); 
+            } else {
+                showMsg('sysMsg', '❌ 操作失败: ' + data.error, false);
+            }
+        } catch(e) {
+            showMsg('sysMsg', '网络请求失败，请检查后端', false);
+        }
+    }
+
+    function toggleLimitEdit(safeAcc) {
+        const el = document.getElementById('editLimit_' + safeAcc);
+        if (el) el.classList.toggle('hidden');
+    }
+
+    async function saveLimit(acc) {
+        const safeAcc = escapeHTML(acc);
+        const inputVal = document.getElementById('inputLimit_' + safeAcc).value;
+        const limitGb = parseInt(inputVal) || 0;
+        
+        try {
+            const res = await fetch('/api/admin/set-traffic-limit', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: sessionCode, account: acc, limit_gb: limitGb})
+            });
+            const data = await res.json();
+            if(data.success) {
+                showMsg('sysMsg', '✅ 流量额度更新成功！', true);
+                loadTraffic(false); 
+            } else {
+                showMsg('sysMsg', data.error || '设置失败', false);
+            }
+        } catch(e) {
+            showMsg('sysMsg', '网络请求失败', false);
+        }
+    }
+
+    async function loadTraffic(force = false) {
+        const listDiv = document.getElementById('trafficList');
+        if (force) {
+            listDiv.innerHTML = '<div style="color:#0d6efd; font-weight: bold;">⏳ 正在向甲骨文 API 请求数据...</div>';
+        }
+        try {
+            const res = await fetch('/api/admin/traffic', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: sessionCode, force: force})
+            });
+            const data = await res.json();
+            if(data.success) {
+                listDiv.innerHTML = '';
+                for (const [acc, info] of Object.entries(data.traffic)) {
+                    let safeAcc = escapeHTML(acc);
+                    let usageText = info.usage_gb >= 0 ? info.usage_gb.toFixed(2) + ' GB' : '获取失败';
+                    let limitText = info.limit_gb > 0 ? info.limit_gb + ' GB' : '不限流量';
+                    let percent = (info.limit_gb > 0 && info.usage_gb >= 0) ? ((info.usage_gb / info.limit_gb) * 100).toFixed(1) : 0;
+                    let color = info.limit_gb > 0 ? (percent > 90 ? '#dc3545' : (percent > 70 ? '#fd7e14' : '#198754')) : '#198754';
+                    let displayPercent = info.limit_gb > 0 ? Math.min(percent, 100) : 0;
+                    let percentText = info.limit_gb > 0 ? `当月占比：${percent}%` : '未设置额度限制';
+                    
+                    listDiv.innerHTML += `
+                        <div style="margin-bottom: 15px; padding: 10px; background: #fff; border-radius: 6px; border: 1px solid #eee;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <strong style="color: #333; font-size:14px;">${safeAcc}</strong>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-weight:bold; font-size:13px; color: ${color};">${usageText} / ${limitText}</span>
+                                    <button onclick="toggleLimitEdit('${safeAcc}')" style="padding: 2px 6px; font-size: 12px; width: auto; background: #6c757d;">⚙️设置</button>
+                                </div>
+                            </div>
+                            
+                            <div id="editLimit_${safeAcc}" class="hidden" style="margin-bottom: 12px; display: flex; gap: 8px; background: #f8f9fa; padding: 8px; border-radius: 4px;">
+                                <input type="number" id="inputLimit_${safeAcc}" value="${info.limit_gb}" placeholder="限额GB (0=不限)" style="padding: 6px; font-size: 12px; margin: 0;">
+                                <button onclick="saveLimit('${acc}')" style="padding: 6px 10px; font-size: 12px; width: auto; background: #198754; margin: 0;">保存</button>
+                            </div>
+
+                            <div style="background-color: #e9ecef; border-radius: 6px; height: 8px; overflow: hidden;">
+                                <div style="background-color: ${color}; width: ${displayPercent}%; height: 100%; transition: width 0.5s;"></div>
+                            </div>
+                            <div style="font-size: 11px; color: #888; margin-top: 6px; display: flex; justify-content: space-between;">
+                                <span>${percentText}</span>
+                                <span>刷新: ${escapeHTML(info.update_time).split(' ')[1]}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                if(Object.keys(data.traffic).length === 0) {
+                    listDiv.innerHTML = '暂无账号配置数据。';
+                }
+            } else {
+                listDiv.innerHTML = `<span class="error">${data.error}</span>`;
+            }
+        } catch (e) {
+            listDiv.innerHTML = `<span class="error">网络请求失败</span>`;
+        }
     }
 
     async function syncServers() {
@@ -206,9 +342,8 @@
             });
             const data = await res.json();
             
-            if (data.servers && Object.keys(data.servers).length > 0) {
-                globalServers = data.servers;
-                // 重新渲染，尝试保留当前正在编辑的表单状态
+            if (data.instances && Object.keys(data.instances).length > 0) {
+                globalInstances = data.instances;
                 const currentTgId = document.getElementById('targetTgId').value.trim();
                 if (currentTgId && globalPerms[currentTgId]) {
                     renderServerList(globalPerms[currentTgId].ocids);
@@ -245,27 +380,36 @@
         if (select.value) { input.value = select.value; loadUserPerms(); }
     }
 
-    // 渲染服务器列表 (参数 userOcids 是一个对象: { ocid: "2026-12-31" })
     function renderServerList(userOcids = {}) {
         const listDiv = document.getElementById('serverList');
         listDiv.innerHTML = '';
-        if (Object.keys(globalServers).length === 0) return listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击同步。</div>';
+        if (Object.keys(globalInstances).length === 0) return listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击同步。</div>';
         
-        for (const [name, ocid] of Object.entries(globalServers)) {
+        for (const [ocid, info] of Object.entries(globalInstances)) {
             const isChecked = userOcids.hasOwnProperty(ocid);
             const checkedAttr = isChecked ? 'checked' : '';
             const dateVal = isChecked ? escapeHTML(userOcids[ocid] || '') : '';
             const hiddenClass = isChecked ? '' : 'hidden';
             
             const safeOcid = escapeHTML(ocid);
-            const safeName = escapeHTML(name);
+            const safeName = escapeHTML(info.name);
+            
+            let stateBadge = info.state === 'RUNNING' 
+                ? `<span style="background:#198754;color:white;padding:2px 6px;border-radius:4px;font-size:12px;margin-left:8px;white-space:nowrap;">运行中</span>`
+                : `<span style="background:#dc3545;color:white;padding:2px 6px;border-radius:4px;font-size:12px;margin-left:8px;white-space:nowrap;">已关机</span>`;
+                
+            let actionBtn = info.state === 'STOPPED' 
+                ? `<button type="button" onclick="event.preventDefault(); doInstanceAction('${safeOcid}', 'START')" style="padding:2px 8px; font-size:12px; width:auto; background:#0d6efd; margin-left:10px;">🚀 开机</button>`
+                : (info.state === 'RUNNING' ? `<button type="button" onclick="event.preventDefault(); doInstanceAction('${safeOcid}', 'SOFTSTOP')" style="padding:2px 8px; font-size:12px; width:auto; background:#ffc107; color:black; margin-left:10px;">🛑 关机</button>` : '');
 
             listDiv.innerHTML += `
             <div class="server-item">
                 <div style="display: flex; align-items: center; width: 100%;">
                     <input type="checkbox" id="chk_${safeOcid}" value="${safeOcid}" onchange="toggleDate('${safeOcid}')" ${checkedAttr}>
-                    <label style="margin:0; cursor:pointer; flex: 1;" for="chk_${safeOcid}">${safeName}</label>
-                    <input type="date" id="date_${safeOcid}" value="${dateVal}" class="${hiddenClass}" style="width: 140px; padding: 6px; margin: 0; font-size: 13px;" title="到期时间 (留空为永久)">
+                    <label style="margin:0; cursor:pointer; flex: 1; display:flex; align-items:center; flex-wrap:wrap; gap:4px;" for="chk_${safeOcid}">
+                        <span style="word-break: break-all;">${safeName}</span> ${stateBadge} ${actionBtn}
+                    </label>
+                    <input type="date" id="date_${safeOcid}" value="${dateVal}" class="${hiddenClass}" style="width: 130px; padding: 6px; margin: 0 0 0 10px; font-size: 12px;" title="到期时间 (留空为永久)">
                 </div>
             </div>`;
         }
@@ -283,7 +427,7 @@
         if (userData) {
             document.getElementById('maxChangesInput').value = userData.max_changes;
             renderQuotaDisplay(userData.max_changes, userData.used_changes);
-            renderServerList(userData.ocids || {}); // 传入对象格式
+            renderServerList(userData.ocids || {}); 
             showMsg('sysMsg', `已加载老客户 ${escapeHTML(tgId)} 的配置`, true);
         } else {
             document.getElementById('maxChangesInput').value = 0;
@@ -337,7 +481,6 @@
         const tgId = document.getElementById('targetTgId').value.trim();
         if(!tgId) return showMsg('sysMsg', '错误：Telegram ID 不能为空', false);
         
-        // 收集所有勾选的服务器及其对应的独立到期时间
         let selectedOcids = {};
         document.querySelectorAll('.server-list input[type="checkbox"]:checked').forEach(cb => {
             const ocid = cb.value;
@@ -352,7 +495,7 @@
                 body: JSON.stringify({
                     code: sessionCode, 
                     tg_id: tgId,
-                    ocids: selectedOcids, // 提交对象格式
+                    ocids: selectedOcids, 
                     max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0
                 })
             });
@@ -366,7 +509,7 @@
                 updateUserDropdown(); document.getElementById('existingUserSelect').value = tgId;
                 showMsg('sysMsg', '✅ 保存成功！', true);
             }
-        } finally { btn.disabled = false; btn.innerText = "💾 保存配置"; }
+        } finally { btn.disabled = false; btn.innerText = "💾 保存当前客户配置"; }
     }
 </script>
 </body>
