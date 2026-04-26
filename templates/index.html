@@ -18,13 +18,13 @@
         button.btn-secondary { background-color: #6c757d; margin-top: 10px; }
         button.btn-secondary:hover { background-color: #5a6268; }
         button.btn-warning { background-color: #ffc107; color: #000; margin-bottom: 15px;}
-        .server-list { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; max-height: 300px; overflow-y: auto; margin-bottom: 20px;}
-        .server-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .server-list { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6; max-height: 400px; overflow-y: auto; margin-bottom: 20px;}
+        .server-item { display: flex; flex-wrap: wrap; align-items: center; padding: 12px 10px; border-bottom: 1px solid #eee; }
         .server-item:last-child { border-bottom: none; }
-        .server-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 15px; cursor: pointer;}
-        .hidden { display: none; }
+        .server-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 12px; cursor: pointer;}
+        .hidden { display: none !important; }
         #msg, #loginMsg { text-align: center; font-weight: bold; margin-top: 15px; min-height: 20px;}
-        .success { color: #198754; } .error { color: #dc3545; }
+        .success { color: #198754; } .error { color: #dc3545; word-break: break-all; }
         .used-info { font-size: 14px; font-weight: bold; color: #198754; margin-top: 5px; display: inline-block; padding: 2px 6px; border-radius: 4px; }
         .panel { background-color: #f1f8ff; padding: 15px; border-radius: 8px; border: 1px solid #b6d4fe; margin-bottom: 20px; }
     </style>
@@ -61,33 +61,33 @@
         </div>
     </div>
     
-    <!-- 到期时间设置区 -->
-    <div class="panel group">
-        <label>⏳ 有效期至 (年-月-日 / 北京时间)</label>
-        <input type="date" id="expireTimeInput" title="点击选择年月日，或输入 YYYY-MM-DD">
-        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
-            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(30)">+ 1 个月</button>
-            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(90)">+ 1 季度</button>
-            <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 8px 12px; width: auto;" onclick="addDays(365)">+ 1 年</button>
-            <button type="button" style="background-color: #20c997; color: #fff; padding: 8px 12px; width: auto;" onclick="setPermanent()">设为永久</button>
-        </div>
-        <div style="font-size: 12px; color: #666; margin-top: 8px;">💡 留空代表永久有效。系统会在到期前 6、4、2天中午自动发送续期提醒。</div>
-    </div>
-
     <!-- 额度管理区 -->
-    <div class="group">
-        <label>🔢 额度管理 <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span></label>
+    <div class="group panel" style="background-color: #fff8f1; border-color: #ffe8d6;">
+        <label>🔢 全局换IP额度管理 <span class="used-info" id="quotaDisplay">(当前剩余：0 次 | 总分配：0 | 已用：0)</span></label>
         <input type="hidden" id="maxChangesInput" value="0">
         <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
-            <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
-            <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
-            <button type="button" style="background-color: #0dcaf0; color: #000; padding: 8px 12px; width: auto;" onclick="addTimes(10)">+10 次</button>
+            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(1)">+1 次</button>
+            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(5)">+5 次</button>
+            <button type="button" style="background-color: #fd7e14; color: #fff; padding: 8px 12px; width: auto;" onclick="addTimes(10)">+10 次</button>
             <input type="number" id="customAddInput" placeholder="填写数值" style="padding: 8px; margin: 0; width: 100px;" onkeypress="if(event.key==='Enter') addCustomTimes()">
-            <button type="button" style="background-color: #17a2b8; padding: 8px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
+            <button type="button" style="background-color: #e35d00; padding: 8px; width: auto;" onclick="addCustomTimes()">➕ 叠加充值</button>
         </div>
+        <div style="font-size: 12px; color: #666; margin-top: 8px;">💡 额度为该客户名下所有节点共享的总次数。</div>
     </div>
 
-    <label>💻 授权可操作的服务器 (可多选)</label>
+    <label style="display: flex; justify-content: space-between; align-items: flex-end;">
+        <span>💻 授权服务器与独立到期日设置</span>
+    </label>
+    
+    <!-- 快捷续期工具栏 -->
+    <div style="background: #e9ecef; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px;">
+        <span style="font-weight:bold; color:#555;">一键续费 (仅对已勾选节点生效):</span>
+        <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(30)">+1个月</button>
+        <button type="button" style="background-color: #6ea8fe; color: #fff; padding: 6px 10px; width: auto;" onclick="addDaysToSelected(90)">+1季度</button>
+        <button type="button" style="background-color: #20c997; color: #fff; padding: 6px 10px; width: auto;" onclick="setPermanentSelected()">设为永久</button>
+    </div>
+
+    <!-- 动态渲染的服务器列表 -->
     <div class="server-list" id="serverList"></div>
 
     <div style="display: flex; gap: 10px;">
@@ -109,41 +109,53 @@
         });
     }
 
-    // 将 2026-12-31 格式化为 2026年12月31日
-    function formatDateToCN(dateStr) {
-        if (!dateStr) return '永久有效';
-        const parts = dateStr.split('-');
-        if (parts.length === 3) {
-            return `${parts[0]}年${parts[1]}月${parts[2]}日`;
-        }
-        return dateStr;
-    }
-
     function showMsg(id, text, isSuccess) {
         const el = document.getElementById(id);
         el.innerText = text;
         el.className = isSuccess ? 'success' : 'error';
-        setTimeout(() => el.innerText = '', 4000);
+        setTimeout(() => el.innerText = '', 8000); 
     }
 
-    // 日期快捷增加
-    function addDays(days) {
-        let currentVal = document.getElementById('expireTimeInput').value;
-        let dateObj = currentVal ? new Date(currentVal) : new Date(); // 如果没值，从今天算起
-        dateObj.setDate(dateObj.getDate() + days);
-        let yyyy = dateObj.getFullYear();
-        let mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-        let dd = String(dateObj.getDate()).padStart(2, '0');
+    // 复选框状态联动显示日期框
+    function toggleDate(ocid) {
+        const cb = document.getElementById('chk_' + ocid);
+        const dt = document.getElementById('date_' + ocid);
+        if(cb.checked) dt.classList.remove('hidden');
+        else dt.classList.add('hidden');
+    }
+
+    // 批量为已勾选的节点增加天数
+    function addDaysToSelected(days) {
+        const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]:checked');
+        if (checkboxes.length === 0) return alert('请先勾选需要续期的服务器！');
         
-        const input = document.getElementById('expireTimeInput');
-        input.value = `${yyyy}-${mm}-${dd}`;
-        input.style.backgroundColor = '#d1e7dd';
-        setTimeout(() => input.style.backgroundColor = '#fff', 400);
+        checkboxes.forEach(cb => {
+            const ocid = cb.value;
+            const input = document.getElementById('date_' + escapeHTML(ocid));
+            let currentVal = input.value;
+            let dateObj = currentVal ? new Date(currentVal) : new Date(); 
+            dateObj.setDate(dateObj.getDate() + days);
+            let yyyy = dateObj.getFullYear();
+            let mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+            let dd = String(dateObj.getDate()).padStart(2, '0');
+            
+            input.value = `${yyyy}-${mm}-${dd}`;
+            input.style.backgroundColor = '#d1e7dd';
+            setTimeout(() => input.style.backgroundColor = '#fff', 400);
+        });
     }
     
-    // 设置永久有效
-    function setPermanent() {
-        document.getElementById('expireTimeInput').value = '';
+    // 批量设为永久
+    function setPermanentSelected() {
+        const checkboxes = document.querySelectorAll('.server-list input[type="checkbox"]:checked');
+        if (checkboxes.length === 0) return alert('请先勾选需要续期的服务器！');
+        checkboxes.forEach(cb => {
+            const ocid = cb.value;
+            const input = document.getElementById('date_' + escapeHTML(ocid));
+            input.value = '';
+            input.style.backgroundColor = '#d1e7dd';
+            setTimeout(() => input.style.backgroundColor = '#fff', 400);
+        });
     }
 
     async function sendAdminCode() {
@@ -188,13 +200,31 @@
 
     async function syncServers() {
         showMsg('sysMsg', '正在同步数据...', true);
-        const res = await fetch('/api/admin/sync', {
-            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: sessionCode})
-        });
-        const data = await res.json();
-        if(data.success) {
-            globalServers = data.servers; renderServerList(); showMsg('sysMsg', '同步成功！', true);
-        } else { showMsg('sysMsg', '同步失败', false); }
+        try {
+            const res = await fetch('/api/admin/sync', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: sessionCode})
+            });
+            const data = await res.json();
+            
+            if (data.servers && Object.keys(data.servers).length > 0) {
+                globalServers = data.servers;
+                // 重新渲染，尝试保留当前正在编辑的表单状态
+                const currentTgId = document.getElementById('targetTgId').value.trim();
+                if (currentTgId && globalPerms[currentTgId]) {
+                    renderServerList(globalPerms[currentTgId].ocids);
+                } else {
+                    renderServerList();
+                }
+            }
+
+            if(data.success) {
+                showMsg('sysMsg', '同步成功！', true);
+            } else {
+                showMsg('sysMsg', data.error || '同步失败，请检查后端日志', false);
+            }
+        } catch(e) {
+            showMsg('sysMsg', '网络请求失败，请检查后端', false);
+        }
     }
 
     function updateUserDropdown() {
@@ -203,10 +233,9 @@
         for (const tgId in globalPerms) {
             const used = globalPerms[tgId].used_changes || 0;
             const max = globalPerms[tgId].max_changes || 0;
-            // 获取并格式化为中文日期
-            const expDisplay = formatDateToCN(globalPerms[tgId].expire_time);
             const safeTgId = escapeHTML(tgId);
-            select.innerHTML += `<option value="${safeTgId}">客户: ${safeTgId} (剩余: ${Math.max(max-used, 0)}次 | ${expDisplay})</option>`;
+            const serverCount = Object.keys(globalPerms[tgId].ocids || {}).length;
+            select.innerHTML += `<option value="${safeTgId}">客户: ${safeTgId} (机器:${serverCount}台 | 余额:${Math.max(max-used, 0)}次)</option>`;
         }
     }
 
@@ -216,13 +245,29 @@
         if (select.value) { input.value = select.value; loadUserPerms(); }
     }
 
-    function renderServerList(checkedOcids = []) {
+    // 渲染服务器列表 (参数 userOcids 是一个对象: { ocid: "2026-12-31" })
+    function renderServerList(userOcids = {}) {
         const listDiv = document.getElementById('serverList');
         listDiv.innerHTML = '';
         if (Object.keys(globalServers).length === 0) return listDiv.innerHTML = '<div style="color:#777; text-align:center;">暂无服务器，请点击同步。</div>';
+        
         for (const [name, ocid] of Object.entries(globalServers)) {
-            const isChecked = checkedOcids.includes(ocid) ? 'checked' : '';
-            listDiv.innerHTML += `<div class="server-item"><input type="checkbox" id="chk_${escapeHTML(ocid)}" value="${escapeHTML(ocid)}" ${isChecked}><label style="margin:0; cursor:pointer;" for="chk_${escapeHTML(ocid)}">${escapeHTML(name)}</label></div>`;
+            const isChecked = userOcids.hasOwnProperty(ocid);
+            const checkedAttr = isChecked ? 'checked' : '';
+            const dateVal = isChecked ? escapeHTML(userOcids[ocid] || '') : '';
+            const hiddenClass = isChecked ? '' : 'hidden';
+            
+            const safeOcid = escapeHTML(ocid);
+            const safeName = escapeHTML(name);
+
+            listDiv.innerHTML += `
+            <div class="server-item">
+                <div style="display: flex; align-items: center; width: 100%;">
+                    <input type="checkbox" id="chk_${safeOcid}" value="${safeOcid}" onchange="toggleDate('${safeOcid}')" ${checkedAttr}>
+                    <label style="margin:0; cursor:pointer; flex: 1;" for="chk_${safeOcid}">${safeName}</label>
+                    <input type="date" id="date_${safeOcid}" value="${dateVal}" class="${hiddenClass}" style="width: 140px; padding: 6px; margin: 0; font-size: 13px;" title="到期时间 (留空为永久)">
+                </div>
+            </div>`;
         }
     }
 
@@ -237,14 +282,13 @@
         let userData = globalPerms[tgId];
         if (userData) {
             document.getElementById('maxChangesInput').value = userData.max_changes;
-            document.getElementById('expireTimeInput').value = userData.expire_time || ''; // 回显到期时间
             renderQuotaDisplay(userData.max_changes, userData.used_changes);
-            renderServerList(userData.ocids);
+            renderServerList(userData.ocids || {}); // 传入对象格式
             showMsg('sysMsg', `已加载老客户 ${escapeHTML(tgId)} 的配置`, true);
         } else {
             document.getElementById('maxChangesInput').value = 0;
-            document.getElementById('expireTimeInput').value = ''; 
-            renderQuotaDisplay(0, 0); renderServerList([]);
+            renderQuotaDisplay(0, 0); 
+            renderServerList({});
             showMsg('sysMsg', `这是新客户，请配置信息后点击保存`, true);
         }
     }
@@ -258,7 +302,7 @@
         renderQuotaDisplay(newMax, used);
         
         const display = document.getElementById('quotaDisplay');
-        display.style.transition = 'background-color 0.3s'; display.style.backgroundColor = '#d1e7dd';
+        display.style.transition = 'background-color 0.3s'; display.style.backgroundColor = '#fff3cd';
         setTimeout(() => display.style.backgroundColor = 'transparent', 400);
     }
 
@@ -282,8 +326,8 @@
             const res = await fetch('/api/admin/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ code: sessionCode, tg_id: tgId }) });
             if((await res.json()).success) {
                 delete globalPerms[tgId]; updateUserDropdown();
-                document.getElementById('targetTgId').value = ''; document.getElementById('maxChangesInput').value = 0; document.getElementById('expireTimeInput').value = '';
-                renderQuotaDisplay(0, 0); renderServerList([]);
+                document.getElementById('targetTgId').value = ''; document.getElementById('maxChangesInput').value = 0; 
+                renderQuotaDisplay(0, 0); renderServerList({});
                 showMsg('sysMsg', '✅ 客户已删除！', true);
             }
         } finally { btn.disabled = false; btn.innerText = "🗑️ 删除客户"; btn.style.backgroundColor = "#dc3545"; btn.style.color = "#fff"; }
@@ -292,24 +336,32 @@
     async function savePermissions() {
         const tgId = document.getElementById('targetTgId').value.trim();
         if(!tgId) return showMsg('sysMsg', '错误：Telegram ID 不能为空', false);
+        
+        // 收集所有勾选的服务器及其对应的独立到期时间
+        let selectedOcids = {};
+        document.querySelectorAll('.server-list input[type="checkbox"]:checked').forEach(cb => {
+            const ocid = cb.value;
+            const dateVal = document.getElementById('date_' + escapeHTML(ocid)).value;
+            selectedOcids[ocid] = dateVal;
+        });
+
         const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.innerText = "正在保存...";
         try {
             const res = await fetch('/api/admin/save', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    code: sessionCode, tg_id: tgId,
-                    ocids: Array.from(document.querySelectorAll('.server-list input:checked')).map(cb => cb.value),
-                    max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0,
-                    expire_time: document.getElementById('expireTimeInput').value || ""  // 提交到期时间
+                    code: sessionCode, 
+                    tg_id: tgId,
+                    ocids: selectedOcids, // 提交对象格式
+                    max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0
                 })
             });
             if((await res.json()).success) {
                 const used = globalPerms[tgId] ? globalPerms[tgId].used_changes : 0;
                 globalPerms[tgId] = { 
-                    ocids: Array.from(document.querySelectorAll('.server-list input:checked')).map(cb => cb.value), 
+                    ocids: selectedOcids, 
                     max_changes: parseInt(document.getElementById('maxChangesInput').value) || 0, 
-                    used_changes: used,
-                    expire_time: document.getElementById('expireTimeInput').value || ""
+                    used_changes: used
                 };
                 updateUserDropdown(); document.getElementById('existingUserSelect').value = tgId;
                 showMsg('sysMsg', '✅ 保存成功！', true);
@@ -319,4 +371,3 @@
 </script>
 </body>
 </html>
-
