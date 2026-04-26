@@ -20,10 +20,24 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN')
-ADMIN_ID = os.getenv('ADMIN_TG_ID')
-
 ACCOUNTS_FILE = 'oci_accounts.yaml'
+
+# --- 启动时预加载 YAML，提取全局配置 ---
+def load_full_yaml():
+    if os.path.exists(ACCOUNTS_FILE):
+        try:
+            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"读取 {ACCOUNTS_FILE} 失败: {e}")
+    return {}
+
+_init_config = load_full_yaml()
+
+# 优先从 YAML 读取核心数据，若不存在则降级读取 .env (兼容老版本)
+TG_BOT_TOKEN = str(_init_config.get('bot_token', os.getenv('TG_BOT_TOKEN', '')))
+ADMIN_ID = str(_init_config.get('admin_id', os.getenv('ADMIN_TG_ID', '')))
+
 STATS_FILE = 'stats.json'
 PERMS_FILE = 'permissions.json'
 IP_CACHE_FILE = 'ip_cache.json'  # 新增：IP 缓存文件，减少 API 频繁请求
@@ -127,13 +141,10 @@ def verify_admin(req_data):
 # OCI 核心逻辑 (多账号适配 + IP缓存获取)
 # ==========================================
 def load_oci_accounts():
-    accounts = {}
-    if os.path.exists(ACCOUNTS_FILE):
-        try:
-            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
-                accounts = yaml.safe_load(f) or {}
-        except Exception as e:
-            print(f"读取 {ACCOUNTS_FILE} 失败: {e}")
+    config = load_full_yaml()
+    # 自动过滤：只要值是“字典(dict)”格式的，就认为是 OCI 账号配置；字符串则忽略
+    accounts = {k: v for k, v in config.items() if isinstance(v, dict)}
+    
     if not accounts and os.getenv('OCI_USER_OCID'):
         accounts["默认账号"] = {
             "user": os.getenv('OCI_USER_OCID'),
