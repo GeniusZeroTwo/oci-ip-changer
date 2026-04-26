@@ -406,6 +406,63 @@ def is_whitelisted(user_id):
     if user_id in perms: return True
     return False
 
+@bot.message_handler(commands=['list'])
+def admin_list_users(message):
+    uid = str(message.chat.id)
+    if uid != str(ADMIN_ID): return bot.send_message(uid, "⛔ **权限拒绝**\n此命令仅限超级管理员使用。")
+
+    # === 第一部分：客户授权目录 ===
+    perms = load_permissions()
+    msg = "📋 **客户授权目录**\n\n"
+    if not perms:
+        msg += "📝 当前系统没有任何客户数据。\n"
+    else:
+        for user_tg_id, data in perms.items():
+            max_c = data.get('max_changes', 0)
+            used_c = data.get('used_changes', 0)
+            rem = max(max_c - used_c, 0)
+            ocids_dict = data.get('ocids', {})
+            
+            msg += f"👤 **客户 ID**: `{user_tg_id}`\n📊 **总剩余额度**: `{rem}` 次\n"
+            if not ocids_dict:
+                msg += "🖥️ **名下机器**: `未分配`\n"
+            else:
+                for ocid, exp in ocids_dict.items():
+                    info = all_instances.get(ocid, {})
+                    s_name = info.get("name", "未知节点 (可能已删除)")
+                    exp_display = exp if exp else "永久有效"
+                    msg += f" ├ 🖥️ {s_name} (到期: `{exp_display}`)\n"
+            msg += "➖" * 12 + "\n"
+
+    # === 第二部分：API 账号当月出站流量概览 ===
+    msg += "\n📈 **当月出站流量概览 (读取最新缓存)**\n\n"
+    accounts = load_oci_accounts()
+    limits_data = load_json_cache(TRAFFIC_LIMITS_FILE)
+    traffic_cache = load_json_cache(TRAFFIC_CACHE_FILE)
+    
+    if not accounts:
+        msg += "⚠️ 暂无 API 账号配置。\n"
+    else:
+        for acc_name in accounts.keys():
+            limit = int(limits_data.get(acc_name, 0))
+            info = traffic_cache.get(acc_name, {})
+            usage_gb = info.get("usage_gb", -1)
+            
+            if usage_gb >= 0:
+                if limit > 0:
+                    percent = (usage_gb / limit) * 100
+                    alert_icon = "🔴" if percent >= 100 else ("🟡" if percent >= 70 else "🟢")
+                    msg += f"{alert_icon} **{acc_name}**\n   用量: `{usage_gb:.2f} GB` / `{limit} GB` ({percent:.1f}%)\n"
+                else:
+                    msg += f"🟢 **{acc_name}**\n   用量: `{usage_gb:.2f} GB` / `不限`\n"
+            else:
+                limit_text = f"{limit} GB" if limit > 0 else "不限"
+                msg += f"❓ **{acc_name}**\n   用量: `获取失败或同步中` / `{limit_text}`\n"
+
+    # 发送消息 (如果消息太长会自动切分)
+    for x in range(0, len(msg), 4000): 
+        bot.send_message(uid, msg[x:x+4000], parse_mode="Markdown")
+
 @bot.message_handler(commands=['start', 'menu'])
 def user_menu(message):
     if not is_whitelisted(message.chat.id): return
