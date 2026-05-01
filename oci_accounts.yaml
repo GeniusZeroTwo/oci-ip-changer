@@ -4,7 +4,8 @@
 # ==========================================
 bot_token: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 admin_id: "123456789"
-
+github_token: "ghp_xxxxxx你的真实Tokenxxxxxx"
+github_repo: "GeniusZeroTwo/oci-data-backup"
 # ==========================================
 # OCI 多账号配置
 # ==========================================
