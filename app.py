@@ -463,6 +463,49 @@ def admin_list_users(message):
     for x in range(0, len(msg), 4000): 
         bot.send_message(uid, msg[x:x+4000], parse_mode="Markdown")
 
+# === 新增：管理员实时强制查询流量命令 ===
+@bot.message_handler(commands=['traffic'])
+def admin_check_traffic(message):
+    uid = str(message.chat.id)
+    if uid != str(ADMIN_ID): 
+        return bot.send_message(uid, "⛔ **权限拒绝**\n此命令仅限超级管理员使用。")
+
+    loading_msg = bot.send_message(uid, "⏳ 正在向甲骨文 API 强制拉取实时流量数据，请稍候...", parse_mode="Markdown")
+    
+    accounts = load_oci_accounts()
+    limits_data = load_json_cache(TRAFFIC_LIMITS_FILE)
+    cache = load_json_cache(TRAFFIC_CACHE_FILE)
+    
+    if not accounts:
+        bot.edit_message_text("⚠️ 暂无 API 账号配置。", chat_id=uid, message_id=loading_msg.message_id)
+        return
+        
+    msg = "📡 **实时出站流量报表 (强制刷新)**\n*(基于 UTC 月初至今计算)*\n\n"
+    now_utc_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    
+    for acc_name, acc_conf in accounts.items():
+        limit = int(limits_data.get(acc_name, 0))
+        usage_gb = fetch_traffic_for_account(acc_conf)
+        
+        if usage_gb >= 0:
+            # 同步更新缓存
+            cache[acc_name] = {"usage_gb": usage_gb, "update_time": now_utc_str}
+            if limit > 0:
+                percent = (usage_gb / limit) * 100
+                alert_icon = "🔴" if percent >= 100 else ("🟡" if percent >= 70 else "🟢")
+                msg += f"{alert_icon} **{acc_name}**\n   用量: `{usage_gb:.2f} GB` / `{limit} GB` ({percent:.1f}%)\n"
+            else:
+                msg += f"🟢 **{acc_name}**\n   用量: `{usage_gb:.2f} GB` / `不限`\n"
+        else:
+            limit_text = f"{limit} GB" if limit > 0 else "不限"
+            msg += f"❓ **{acc_name}**\n   用量: `获取失败` / `{limit_text}`\n"
+            
+    # 将最新获取的数据存回缓存，方便网页端也同步显示
+    save_json_cache(TRAFFIC_CACHE_FILE, cache)
+    
+    # 修改状态消息，显示最新报表
+    bot.edit_message_text(msg, chat_id=uid, message_id=loading_msg.message_id, parse_mode="Markdown")
+
 @bot.message_handler(commands=['start', 'menu'])
 def user_menu(message):
     if not is_whitelisted(message.chat.id): return
