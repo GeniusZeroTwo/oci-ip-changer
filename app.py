@@ -8,14 +8,12 @@ import secrets
 import yaml
 import oci
 import telebot
+import base64
+import requests
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-from dotenv import load_dotenv
-
-# 加载配置
-load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -33,8 +31,10 @@ def load_full_yaml():
 
 _init_config = load_full_yaml()
 
-TG_BOT_TOKEN = str(_init_config.get('bot_token', os.getenv('TG_BOT_TOKEN', '')))
-ADMIN_ID = str(_init_config.get('admin_id', os.getenv('ADMIN_TG_ID', '')))
+TG_BOT_TOKEN = str(_init_config.get('bot_token', ''))
+ADMIN_ID = str(_init_config.get('admin_id', ''))
+GITHUB_TOKEN = str(_init_config.get('github_token', ''))
+GITHUB_REPO = str(_init_config.get('github_repo', ''))
 
 STATS_FILE = 'stats.json'
 PERMS_FILE = 'permissions.json'
@@ -123,6 +123,57 @@ def verify_admin(req_data):
         admin_session['attempts'] += 1
         return False
 
+def backup_to_github():
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False, "⚠️ 未配置 GITHUB_TOKEN 或 GITHUB_REPO，已跳过备份。"
+
+    files_to_backup = [PERMS_FILE, STATS_FILE, TRAFFIC_LIMITS_FILE]
+    success_count = 0
+    error_msgs = []
+
+    for filename in files_to_backup:
+        if not os.path.exists(filename):
+            continue
+
+        try:
+            with open(filename, 'rb') as f:
+                content = f.read()
+
+            encoded_content = base64.b64encode(content).decode('utf-8')
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+            headers = {
+                "Authorization": f"token {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+
+            # 先尝试获取文件现有的 SHA 值（如果是更新必须带上这个 SHA）
+            sha = None
+            get_resp = requests.get(url, headers=headers)
+            if get_resp.status_code == 200:
+                sha = get_resp.json().get('sha')
+
+            data = {
+                "message": f"Auto backup {filename} by Bot at {get_bj_now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "content": encoded_content
+            }
+            if sha:
+                data["sha"] = sha
+
+            put_resp = requests.put(url, headers=headers, json=data)
+            if put_resp.status_code in [200, 201]:
+                success_count += 1
+            elif put_resp.status_code == 422:
+                # 422 通常意味着文件内容完全一致，没有实质性修改
+                success_count += 1
+            else:
+                error_msgs.append(f"{filename} 失败: {put_resp.status_code}")
+        except Exception as e:
+            error_msgs.append(f"{filename} 异常: {str(e)}")
+
+    if error_msgs:
+        return False, "备份存在部分问题:\n" + "\n".join(error_msgs)
+    return True, f"✅ 成功将 {success_count} 个核心数据文件同步至 GitHub！"
+
 # ==========================================
 # OCI 核心逻辑 & 流量抓取 
 # ==========================================
@@ -133,14 +184,6 @@ def load_oci_accounts():
         if isinstance(v, dict):
             accounts[k] = v
             
-    if not accounts and os.getenv('OCI_USER_OCID'):
-        accounts["默认账号"] = {
-            "user": os.getenv('OCI_USER_OCID'),
-            "key_file": os.getenv('OCI_KEY_FILE'),
-            "fingerprint": os.getenv('OCI_FINGERPRINT'),
-            "tenancy": os.getenv('OCI_TENANCY_OCID'),
-            "region": os.getenv('OCI_REGION')
-        }
     return accounts
 
 def fetch_oci_instances():
@@ -389,6 +432,12 @@ def background_jobs_loop():
                 report_msg = f"📊 **每日出站流量战报 (基于 UTC 月初)**\n📅 UTC 日期: `{today_utc_str}`\n*(每个自然月1号系统自动从零计算)*\n\n" + "\n\n".join(report_lines)
                 send_tg_message(ADMIN_ID, report_msg)
                 
+                # 在每日战报后，自动触发 GitHub 数据备份
+                if GITHUB_TOKEN and GITHUB_REPO:
+                    is_success, bk_msg = backup_to_github()
+                    if not is_success:
+                        send_tg_message(ADMIN_ID, f"🔴 **自动备份失败**\n{bk_msg}")
+                
                 last_traffic_report_utc = today_utc_str
 
         except Exception as e:
@@ -462,6 +511,17 @@ def admin_list_users(message):
     # 发送消息 (如果消息太长会自动切分)
     for x in range(0, len(msg), 4000): 
         bot.send_message(uid, msg[x:x+4000], parse_mode="Markdown")
+
+# === 新增：强制 GitHub 数据备份命令 ===
+@bot.message_handler(commands=['backup'])
+def admin_manual_backup(message):
+    uid = str(message.chat.id)
+    if uid != str(ADMIN_ID): 
+        return bot.send_message(uid, "⛔ **权限拒绝**\n此命令仅限超级管理员使用。")
+        
+    loading_msg = bot.send_message(uid, "⏳ 正在打包并加密上传数据至 GitHub，请稍候...", parse_mode="Markdown")
+    is_success, msg = backup_to_github()
+    bot.edit_message_text(msg, chat_id=uid, message_id=loading_msg.message_id)
 
 # === 新增：管理员实时强制查询流量命令 ===
 @bot.message_handler(commands=['traffic'])
