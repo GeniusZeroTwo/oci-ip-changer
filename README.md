@@ -220,3 +220,22 @@ sudo journalctl -u oci-ip -f
 ## 📄 License
 
 如需开源发布，建议补充 `LICENSE` 文件并在此处声明许可证类型。
+
+# 您的 GitHub Personal Access Token (需要勾选 repo 权限)
+GITHUB_TOKEN="ghp_xxxxxx你的真实Tokenxxxxxx"
+
+# 指向您那个单独的备份项目
+GITHUB_REPO="GeniusZeroTwo/oci-data-backup"
+Repository access (仓库访问):
+
+    选择 "Only select repositories" (仅选择特定存储库)。
+
+    然后在下拉菜单中，选择您的那个单独备份项目：oci-data-backup。这样这个 Token 就只能修改这个备份仓库，非常安全。
+
+Repository permissions (存储库权限):
+
+    展开权限列表，向下滑动找到 "Contents" (内容) 这一项。（注：它的描述通常是 Create, update, delete, and list repository content）
+
+    将 "Contents" 的下拉菜单从 "No access" 改为 "Read and write" (阅读与写作)。
+
+    (注意：当您将 Contents 设为 Read and write 时，Metadata (元数据) 会自动变成 Read-only，这是正常的必选项)。
